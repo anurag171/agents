@@ -1,7 +1,16 @@
 const $ = (id) => document.getElementById(id);
-let DATA = { news: [], board: [], buys: [], sells: [], watch: [] };
+let DATA = { news: [], board: [], buys: [], sells: [], watch: [], coverage: [] };
 let FILTER = "all";
 let QUERY = "";
+
+const SOURCE_FILTERS = {
+  et: "Economic Times",
+  mc: "Moneycontrol",
+  nse: "NSE",
+  msn: "MSN Money",
+  yf: "Yahoo Finance",
+  mw: "MarketWatch",
+};
 
 function tick() {
   const now = new Date();
@@ -10,17 +19,24 @@ function tick() {
     now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false });
 }
 
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  $("theme").textContent = theme === "dark" ? "Light" : "Dark";
+  localStorage.setItem("vm-theme", theme);
+}
+
 function applyFilter(news) {
   const q = QUERY.trim().toLowerCase();
   return news.filter((n) => {
-    if (FILTER === "et" && n.source !== "Economic Times") return false;
-    if (FILTER === "yf" && n.source !== "Yahoo Finance") return false;
+    if (FILTER === "india" && n.region !== "India") return false;
+    if (FILTER === "global" && n.region !== "Global") return false;
+    if (SOURCE_FILTERS[FILTER] && n.source !== SOURCE_FILTERS[FILTER]) return false;
     if (FILTER === "buy" && !(n.direct_buy.length || n.indirect_buy.length)) return false;
     if (FILTER === "sell" && !(n.direct_sell.length || n.indirect_sell.length)) return false;
     if (FILTER === "direct" && !(n.direct_buy.length || n.direct_sell.length)) return false;
     if (!q) return true;
     const blob = [
-      n.title, n.theme, n.meaning,
+      n.title, n.theme, n.meaning, n.source, n.region,
       ...(n.signals || []).map((s) => s.ticker + " " + s.why),
     ].join(" ").toLowerCase();
     return blob.includes(q);
@@ -64,13 +80,27 @@ function renderBoard(el, rows, action) {
     .join("");
 }
 
+function renderStats() {
+  const n = DATA.count || (DATA.news || []).length;
+  const buys = (DATA.buys || []).length;
+  const sells = (DATA.sells || []).length;
+  const live = (DATA.coverage || []).filter((c) => c.raw > 0).length;
+  $("stats").innerHTML = `
+    <div class="stat"><span>Decoded</span><b>${n}</b></div>
+    <div class="stat"><span>Buy names</span><b>${buys}</b></div>
+    <div class="stat"><span>Sell names</span><b>${sells}</b></div>
+    <div class="stat"><span>Live sources</span><b>${live}</b></div>
+  `;
+}
+
 function render() {
+  renderStats();
   renderBoard($("buys"), DATA.board || [], "BUY");
   renderBoard($("sells"), DATA.board || [], "SELL");
   renderBoard($("watch"), DATA.board || [], "WATCH");
   const news = applyFilter(DATA.news || []);
   if (!news.length) {
-    $("feed").innerHTML = '<p class="muted">Waiting for mapped headlines from Yahoo Finance and Economic Times...</p>';
+    $("feed").innerHTML = '<p class="muted">Waiting for mapped headlines from India + global sources...</p>';
     return;
   }
   $("feed").innerHTML = news
@@ -79,7 +109,7 @@ function render() {
       const when = (n.published_at || n.fetched_at || "").replace("T", " ").slice(0, 16);
       return `<article class="card">
         <div>
-          <div class="src">${n.source} · grade ${n.source_grade}</div>
+          <div class="src">${n.region || ""} · ${n.source} · grade ${n.source_grade}</div>
           <div class="theme">${n.theme}</div>
           <div class="muted">${when} UTC<br/>${n.tape}</div>
         </div>
@@ -102,13 +132,14 @@ function ingest(snap) {
   DATA = snap || DATA;
   const n = (snap && snap.count) || 0;
   const t = (snap && snap.updated_at) ? snap.updated_at.replace("T", " ").slice(0, 19) : "pending";
-  $("meta").textContent = `${n} decoded prints · cycle ${snap.cycle || 0} · ${t} UTC`;
+  const live = ((snap && snap.coverage) || []).filter((c) => c.raw > 0).map((c) => c.source);
+  $("meta").textContent = `${n} decoded · cycle ${snap.cycle || 0} · ${t} UTC` + (live.length ? ` · ${live.slice(0, 6).join(", ")}` : "");
   $("pulse").classList.toggle("live", n > 0);
   render();
 }
 
 async function refresh() {
-  $("meta").textContent = "scraping Yahoo Finance + Economic Times...";
+  $("meta").textContent = "scraping India + global tape...";
   try {
     const r = await fetch("/api/refresh");
     ingest(await r.json());
@@ -127,6 +158,12 @@ document.querySelectorAll(".pills button").forEach((b) => {
     render();
   });
 });
+$("theme").addEventListener("click", () => {
+  applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
+});
+
+const saved = localStorage.getItem("vm-theme");
+applyTheme(saved === "light" ? "light" : "dark");
 
 setInterval(tick, 1000);
 tick();

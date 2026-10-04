@@ -12,4 +12,8 @@ JSON: http://127.0.0.1:8000/api/briefing
 Force scrape: http://127.0.0.1:8000/api/refresh
 SSE stream: http://127.0.0.1:8000/stream
 
+India: Economic Times, Moneycontrol, CNBC-TV18, Business Standard, NSE, MSN Money.
+Global: Yahoo Finance, MarketWatch, Investing.com, Seeking Alpha, Bloomberg, Reuters, FT, WSJ.
+Bloomberg/Reuters/FT/WSJ often paywall; RSS headlines still map. Light/dark theme in the header.
+
 Educational impact map from public headlines. Not personalized investment advice.

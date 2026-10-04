@@ -14,6 +14,7 @@ STATE = {
     "news": [],
     "board": [],
     "errors": [],
+    "coverage": [],
     "updated_at": None,
     "cycle": 0,
     "lock": threading.Lock(),
@@ -22,8 +23,23 @@ STATE = {
 REFRESH_SECONDS = 90
 
 
+def _pack(decoded, board, errors, coverage, updated_at, cycle):
+    return {
+        "updated_at": updated_at,
+        "cycle": cycle,
+        "count": len(decoded),
+        "errors": errors,
+        "coverage": coverage,
+        "news": decoded,
+        "board": board,
+        "buys": [r for r in board if r["action"] == "BUY"],
+        "sells": [r for r in board if r["action"] == "SELL"],
+        "watch": [r for r in board if r["action"] == "WATCH"],
+    }
+
+
 def _build():
-    raw, errors = scrape_all()
+    raw, errors, coverage = scrape_all()
     decoded = []
     for item in raw:
         parsed = decode_item(item)
@@ -34,36 +50,22 @@ def _build():
         STATE["news"] = decoded
         STATE["board"] = board
         STATE["errors"] = errors
+        STATE["coverage"] = coverage
         STATE["updated_at"] = datetime.now(timezone.utc).isoformat()
         STATE["cycle"] += 1
-        snap = {
-            "updated_at": STATE["updated_at"],
-            "cycle": STATE["cycle"],
-            "count": len(decoded),
-            "errors": errors,
-            "news": decoded,
-            "board": board,
-            "buys": [r for r in board if r["action"] == "BUY"],
-            "sells": [r for r in board if r["action"] == "SELL"],
-            "watch": [r for r in board if r["action"] == "WATCH"],
-        }
-    return snap
+        return _pack(decoded, board, errors, coverage, STATE["updated_at"], STATE["cycle"])
 
 
 def _snapshot():
     with STATE["lock"]:
-        board = STATE["board"]
-        return {
-            "updated_at": STATE["updated_at"],
-            "cycle": STATE["cycle"],
-            "count": len(STATE["news"]),
-            "errors": list(STATE["errors"]),
-            "news": list(STATE["news"]),
-            "board": list(board),
-            "buys": [r for r in board if r["action"] == "BUY"],
-            "sells": [r for r in board if r["action"] == "SELL"],
-            "watch": [r for r in board if r["action"] == "WATCH"],
-        }
+        return _pack(
+            list(STATE["news"]),
+            list(STATE["board"]),
+            list(STATE["errors"]),
+            list(STATE["coverage"]),
+            STATE["updated_at"],
+            STATE["cycle"],
+        )
 
 
 def _loop():

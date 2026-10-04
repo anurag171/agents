@@ -68,7 +68,18 @@ def decode_item(item):
     blob = f"{title}. {summary}"
     named = _named_companies(blob)
     themes = _theme_hits(blob)
-    source_grade = "B" if item.get("source") in ("Yahoo Finance", "Economic Times") else "C"
+    GRADE_A = {"Bloomberg", "Reuters", "Financial Times", "WSJ", "NSE"}
+    GRADE_B = {
+        "Yahoo Finance", "Economic Times", "Moneycontrol", "CNBC-TV18",
+        "Business Standard", "MarketWatch", "Investing.com", "Seeking Alpha", "MSN Money",
+    }
+    src = item.get("source") or ""
+    if src in GRADE_A:
+        source_grade = "A"
+    elif src in GRADE_B:
+        source_grade = "B"
+    else:
+        source_grade = "C"
 
     signals = []
     seen_pair = set()
@@ -150,6 +161,7 @@ def decode_item(item):
     return {
         "id": item["id"],
         "source": item["source"],
+        "region": item.get("region") or "Global",
         "title": title,
         "url": item["url"],
         "summary": summary,

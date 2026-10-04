@@ -1,16 +1,17 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Vitta-Mantri — News Impact Device</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Newsreader:opsz,wght@6..72,500;6..72,650&family=Syne:wght@700;800&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=IBM+Plex+Mono:wght@400;500;600&family=Syne:wght@700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
 </head>
 <body>
-  <div class="grain"></div>
+  <div class="orb orb-a"></div>
+  <div class="orb orb-b"></div>
   <header class="mast">
     <div class="brand">
       <div class="seal">VM</div>
@@ -23,25 +24,34 @@
       <div class="pulse" id="pulse"></div>
       <div>
         <div class="clock" id="clock">--</div>
-        <div class="meta" id="meta">scraping Yahoo Finance + Economic Times</div>
+        <div class="meta" id="meta">scraping India + global tape</div>
       </div>
+      <button id="theme" type="button" aria-label="Toggle theme">Dark</button>
       <button id="refresh" type="button">Force scrape</button>
     </div>
   </header>
 
   <section class="disclaimer">
-    Educational impact map from public headlines. Not personalized investment advice. Positions can be wrong, late, or already priced.
+    Educational impact map from public headlines. Not personalized investment advice. Positions can be wrong, late, or already priced. Bloomberg / Reuters / FT / WSJ often paywall — RSS headlines still map.
   </section>
+
+  <section class="stats" id="stats"></section>
 
   <section class="controls">
     <input id="q" type="search" placeholder="Filter ticker or headline — RELIANCE, NVDA, rupee, oil..." />
-    <div class="pills">
+    <div class="pills" id="pills">
       <button data-f="all" class="on">All tape</button>
+      <button data-f="india">India</button>
+      <button data-f="global">Global</button>
       <button data-f="buy">Buy board</button>
       <button data-f="sell">Sell board</button>
       <button data-f="direct">Direct only</button>
       <button data-f="et">Economic Times</button>
+      <button data-f="mc">Moneycontrol</button>
+      <button data-f="nse">NSE</button>
+      <button data-f="msn">MSN Money</button>
       <button data-f="yf">Yahoo Finance</button>
+      <button data-f="mw">MarketWatch</button>
     </div>
   </section>
 
@@ -69,7 +79,9 @@
   </section>
 
   <footer>
-    Sources scraped every 90s from Yahoo Finance and Economic Times RSS + HTML. Direct = issuer / first cash-flow. Indirect = suppliers, customers, FX, rates, competitors, flows.
+    India: ET, Moneycontrol, CNBC-TV18, Business Standard, NSE, MSN Money.
+    Global: Yahoo Finance, MarketWatch, Investing.com, Seeking Alpha, Bloomberg, Reuters, FT, WSJ.
+    Direct = issuer cash-flow. Indirect = suppliers, customers, FX, rates, competitors, flows.
   </footer>
   <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
