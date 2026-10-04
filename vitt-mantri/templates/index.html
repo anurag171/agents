@@ -39,6 +39,7 @@
 
   <section class="controls">
     <input id="q" type="search" placeholder="Filter ticker or headline — RELIANCE, NVDA, rupee, oil..." />
+    <p class="filter-hint" id="filterHint">Showing all tape</p>
     <div class="pills" id="pills">
       <button data-f="all" class="on">All tape</button>
       <button data-f="india">India</button>
@@ -50,8 +51,16 @@
       <button data-f="mc">Moneycontrol</button>
       <button data-f="nse">NSE</button>
       <button data-f="msn">MSN Money</button>
+      <button data-f="cnbc">CNBC-TV18</button>
+      <button data-f="bs">Business Standard</button>
       <button data-f="yf">Yahoo Finance</button>
       <button data-f="mw">MarketWatch</button>
+      <button data-f="inv">Investing.com</button>
+      <button data-f="sa">Seeking Alpha</button>
+      <button data-f="bbg">Bloomberg</button>
+      <button data-f="reu">Reuters</button>
+      <button data-f="ft">FT</button>
+      <button data-f="wsj">WSJ</button>
     </div>
   </section>
 
@@ -73,7 +82,7 @@
   <section class="feed-wrap">
     <div class="feed-head">
       <h2>Headline meaning stream</h2>
-      <p>Each card: what the news is, what it means, who it hits directly, who it hits indirectly, then BUY/SELL.</p>
+      <p>AI reads the headline first, writes the financial meaning, then the BUY/SELL map. Rules engine is the fallback if USER_LLM_API_KEY is unset.</p>
     </div>
     <div id="feed" class="feed"></div>
   </section>

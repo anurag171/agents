@@ -1,11 +1,14 @@
 # Vitta-Mantri
 
-Live stock-news decoder. Scrapes Yahoo Finance and Economic Times, reads each headline, maps direct and indirect financial impact, and streams a BUY / SELL / WATCH board.
+Live stock-news decoder. Scrapes India + global tape, AI-interprets each headline, then maps direct and indirect financial impact into a BUY / SELL / WATCH board.
 
 ```bash
 pip3 install --break-system-packages -r requirements.txt
+cp .env.example .env
 python3 app.py
 ```
+
+Put your own key in `.env` as `USER_LLM_API_KEY`. Do not reuse Agent environment keys. Without it, the rules engine still maps headlines.
 
 Device: http://127.0.0.1:8000
 JSON: http://127.0.0.1:8000/api/briefing

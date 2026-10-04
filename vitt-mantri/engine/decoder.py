@@ -193,6 +193,8 @@ def aggregate_board(decoded):
         "indirect_sell": 0.0,
         "headlines": [],
         "whys": [],
+        "sources": [],
+        "regions": [],
     })
     for news in decoded:
         for s in news["signals"]:
@@ -209,6 +211,12 @@ def aggregate_board(decoded):
                 row["headlines"].append(news["title"])
             if s["why"] not in row["whys"]:
                 row["whys"].append(s["why"])
+            src = news.get("source")
+            if src and src not in row["sources"]:
+                row["sources"].append(src)
+            region = news.get("region")
+            if region and region not in row["regions"]:
+                row["regions"].append(region)
 
     board = []
     for ticker, row in book.items():
@@ -233,6 +241,8 @@ def aggregate_board(decoded):
                 "headlines": row["headlines"][:4],
                 "why": " | ".join(row["whys"][:3]),
                 "conviction": min(5, round(abs(net) / 2.0, 1)),
+                "sources": row["sources"],
+                "regions": row["regions"],
             }
         )
     board.sort(key=lambda r: abs(r["net"]), reverse=True)

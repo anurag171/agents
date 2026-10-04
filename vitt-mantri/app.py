@@ -1,12 +1,32 @@
 import json
+import os
 import threading
 import time
 from datetime import datetime, timezone
 
 from flask import Flask, Response, jsonify, render_template, request, stream_with_context
 
+from engine.ai import apply_ai, configured as ai_configured, interpret_batch
 from engine.decoder import aggregate_board, decode_item
 from engine.scraper import scrape_all
+
+
+def _load_user_llm_env():
+    path = os.path.join(os.path.dirname(__file__), ".env")
+    if not os.path.isfile(path):
+        return
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            if key.startswith("USER_LLM_") and key not in os.environ:
+                os.environ[key] = value.strip().strip('"').strip("'")
+
+
+_load_user_llm_env()
 
 app = Flask(__name__)
 
@@ -15,6 +35,7 @@ STATE = {
     "board": [],
     "errors": [],
     "coverage": [],
+    "interpreter": "rules",
     "updated_at": None,
     "cycle": 0,
     "lock": threading.Lock(),
@@ -23,13 +44,15 @@ STATE = {
 REFRESH_SECONDS = 90
 
 
-def _pack(decoded, board, errors, coverage, updated_at, cycle):
+def _pack(decoded, board, errors, coverage, updated_at, cycle, interpreter="rules"):
     return {
         "updated_at": updated_at,
         "cycle": cycle,
         "count": len(decoded),
         "errors": errors,
         "coverage": coverage,
+        "interpreter": interpreter,
+        "ai_ready": ai_configured(),
         "news": decoded,
         "board": board,
         "buys": [r for r in board if r["action"] == "BUY"],
@@ -45,15 +68,18 @@ def _build():
         parsed = decode_item(item)
         if parsed:
             decoded.append(parsed)
+    ai_map, interpreter = interpret_batch(decoded)
+    decoded = apply_ai(decoded, ai_map, interpreter)
     board = aggregate_board(decoded)
     with STATE["lock"]:
         STATE["news"] = decoded
         STATE["board"] = board
         STATE["errors"] = errors
         STATE["coverage"] = coverage
+        STATE["interpreter"] = interpreter
         STATE["updated_at"] = datetime.now(timezone.utc).isoformat()
         STATE["cycle"] += 1
-        return _pack(decoded, board, errors, coverage, STATE["updated_at"], STATE["cycle"])
+        return _pack(decoded, board, errors, coverage, STATE["updated_at"], STATE["cycle"], interpreter)
 
 
 def _snapshot():
@@ -65,6 +91,7 @@ def _snapshot():
             list(STATE["coverage"]),
             STATE["updated_at"],
             STATE["cycle"],
+            STATE.get("interpreter") or "rules",
         )
 
 

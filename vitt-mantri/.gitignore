@@ -74,6 +74,7 @@
 *.egg
 **/.venv/
 **/venv/
+.env
 **/ENV/
 **/.pytest_cache/
 **/.mypy_cache/
