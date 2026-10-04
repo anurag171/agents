@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Vitta-Mantri — News Impact Device</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Newsreader:opsz,wght@6..72,500;6..72,650&family=Syne:wght@700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+  <div class="grain"></div>
+  <header class="mast">
+    <div class="brand">
+      <div class="seal">VM</div>
+      <div>
+        <p class="kicker">वित्त मंत्री · live decoder</p>
+        <h1>Vitta-Mantri</h1>
+      </div>
+    </div>
+    <div class="status">
+      <div class="pulse" id="pulse"></div>
+      <div>
+        <div class="clock" id="clock">--</div>
+        <div class="meta" id="meta">scraping Yahoo Finance + Economic Times</div>
+      </div>
+      <button id="refresh" type="button">Force scrape</button>
+    </div>
+  </header>
+
+  <section class="disclaimer">
+    Educational impact map from public headlines. Not personalized investment advice. Positions can be wrong, late, or already priced.
+  </section>
+
+  <section class="controls">
+    <input id="q" type="search" placeholder="Filter ticker or headline — RELIANCE, NVDA, rupee, oil..." />
+    <div class="pills">
+      <button data-f="all" class="on">All tape</button>
+      <button data-f="buy">Buy board</button>
+      <button data-f="sell">Sell board</button>
+      <button data-f="direct">Direct only</button>
+      <button data-f="et">Economic Times</button>
+      <button data-f="yf">Yahoo Finance</button>
+    </div>
+  </section>
+
+  <section class="boards">
+    <article class="col buy">
+      <h2><span>BUY</span> financial impact supports long</h2>
+      <ol id="buys"></ol>
+    </article>
+    <article class="col sell">
+      <h2><span>SELL</span> financial impact supports short / avoid</h2>
+      <ol id="sells"></ol>
+    </article>
+    <article class="col watch">
+      <h2><span>WATCH</span> mixed or not yet sized</h2>
+      <ol id="watch"></ol>
+    </article>
+  </section>
+
+  <section class="feed-wrap">
+    <div class="feed-head">
+      <h2>Headline meaning stream</h2>
+      <p>Each card: what the news is, what it means, who it hits directly, who it hits indirectly, then BUY/SELL.</p>
+    </div>
+    <div id="feed" class="feed"></div>
+  </section>
+
+  <footer>
+    Sources scraped every 90s from Yahoo Finance and Economic Times RSS + HTML. Direct = issuer / first cash-flow. Indirect = suppliers, customers, FX, rates, competitors, flows.
+  </footer>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

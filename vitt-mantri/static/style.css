@@ -1,0 +1,242 @@
+:root {
+  --ink: #14110b;
+  --paper: #efe6d2;
+  --rule: #cbb98a;
+  --gold: #c9a227;
+  --buy: #1f6b45;
+  --buy-bg: #dceee3;
+  --sell: #8c1d1d;
+  --sell-bg: #f3d6d2;
+  --watch: #6b5424;
+  --watch-bg: #efe3c4;
+  --card: #f7f1e4;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  min-height: 100vh;
+  background:
+    radial-gradient(1200px 500px at 10% -10%, #f4e7c4 0%, transparent 50%),
+    linear-gradient(180deg, #f3ead6 0%, var(--paper) 40%, #e7dcc3 100%);
+  color: var(--ink);
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  letter-spacing: -0.01em;
+}
+
+.grain {
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  opacity: 0.07;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  z-index: 0;
+}
+
+.mast, .disclaimer, .controls, .boards, .feed-wrap, footer {
+  position: relative;
+  z-index: 1;
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: 0 22px;
+}
+
+.mast {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  align-items: flex-end;
+  padding-top: 28px;
+  padding-bottom: 18px;
+  border-bottom: 3px solid var(--ink);
+}
+
+.brand { display: flex; gap: 14px; align-items: center; }
+.seal {
+  width: 58px; height: 58px;
+  border: 2px solid var(--ink);
+  border-radius: 50%;
+  display: grid; place-items: center;
+  font-family: Syne, sans-serif;
+  font-weight: 800;
+  background: var(--gold);
+}
+.kicker { margin: 0; font-size: 11px; text-transform: uppercase; color: #6a5a32; }
+h1 {
+  margin: 0;
+  font-family: Syne, sans-serif;
+  font-size: 34px;
+  line-height: 1;
+  font-weight: 800;
+}
+.status { display: flex; gap: 12px; align-items: center; }
+.pulse {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: #888; box-shadow: 0 0 0 0 rgba(31,107,69,.6);
+}
+.pulse.live {
+  background: var(--buy);
+  animation: beat 1.8s infinite;
+}
+@keyframes beat {
+  0% { box-shadow: 0 0 0 0 rgba(31,107,69,.55); }
+  100% { box-shadow: 0 0 0 12px rgba(31,107,69,0); }
+}
+.clock { font-size: 13px; font-weight: 600; }
+.meta { font-size: 11px; color: #6a5a32; max-width: 280px; }
+button {
+  font-family: inherit;
+  background: var(--ink);
+  color: var(--paper);
+  border: 0;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+button:hover { background: #2b2418; }
+
+.disclaimer {
+  margin-top: 10px;
+  font-size: 11px;
+  border: 1px dashed var(--rule);
+  padding: 8px 12px;
+  background: #f6eedc;
+}
+
+.controls { margin-top: 18px; }
+#q {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1.5px solid var(--ink);
+  background: #fffaf0;
+  font-family: inherit;
+  font-size: 13px;
+}
+.pills { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.pills button {
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--ink);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+.pills button.on { background: var(--ink); color: var(--paper); }
+
+.boards {
+  display: grid;
+  grid-template-columns: 1.15fr 1.15fr .9fr;
+  gap: 14px;
+  margin-top: 22px;
+}
+.col {
+  background: var(--card);
+  border: 1px solid var(--ink);
+  min-height: 280px;
+  padding: 12px;
+}
+.col h2 {
+  margin: 0 0 10px;
+  font-family: Newsreader, serif;
+  font-size: 18px;
+  font-weight: 650;
+  border-bottom: 1px solid var(--rule);
+  padding-bottom: 8px;
+}
+.col h2 span {
+  font-family: Syne, sans-serif;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  margin-right: 8px;
+}
+.col.buy h2 span { color: var(--buy); }
+.col.sell h2 span { color: var(--sell); }
+.col.watch h2 span { color: var(--watch); }
+.col ol { list-style: none; margin: 0; padding: 0; }
+.row {
+  display: grid;
+  grid-template-columns: 92px 1fr auto;
+  gap: 8px;
+  padding: 9px 0;
+  border-bottom: 1px dotted var(--rule);
+  align-items: start;
+}
+.ticker {
+  font-family: Syne, sans-serif;
+  font-weight: 800;
+  font-size: 15px;
+}
+.why { font-size: 11px; line-height: 1.45; color: #3d3423; }
+.chip {
+  font-size: 10px;
+  padding: 3px 6px;
+  border: 1px solid currentColor;
+  white-space: nowrap;
+}
+.chip.buy { color: var(--buy); background: var(--buy-bg); }
+.chip.sell { color: var(--sell); background: var(--sell-bg); }
+.chip.watch { color: var(--watch); background: var(--watch-bg); }
+
+.feed-wrap { margin-top: 28px; }
+.feed-head h2 {
+  font-family: Newsreader, serif;
+  font-size: 28px;
+  margin: 0;
+}
+.feed-head p { margin: 6px 0 14px; font-size: 12px; color: #5c4e32; }
+.feed { display: grid; gap: 12px; }
+.card {
+  background: #fffaf0;
+  border: 1px solid var(--ink);
+  padding: 16px 16px 12px;
+  display: grid;
+  grid-template-columns: 118px 1fr;
+  gap: 14px;
+}
+.card .src {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.card .theme {
+  margin-top: 8px;
+  font-family: Syne, sans-serif;
+  font-size: 12px;
+  color: var(--gold);
+}
+.card h3 {
+  font-family: Newsreader, serif;
+  font-size: 22px;
+  margin: 0 0 8px;
+  font-weight: 650;
+  line-height: 1.2;
+}
+.card h3 a { color: inherit; text-decoration: none; }
+.card h3 a:hover { text-decoration: underline; }
+.meaning {
+  font-size: 12.5px;
+  line-height: 1.55;
+  margin: 0 0 10px;
+}
+.legs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.leg {
+  border: 1px solid var(--rule);
+  padding: 8px;
+  font-size: 11px;
+}
+.leg strong { display: block; margin-bottom: 4px; font-size: 10px; letter-spacing: 0.08em; }
+.tag {
+  display: inline-block;
+  margin: 2px 4px 2px 0;
+  padding: 2px 6px;
+  border: 1px solid var(--ink);
+  font-size: 10px;
+}
+.tag.buy { background: var(--buy-bg); }
+.tag.sell { background: var(--sell-bg); }
+.muted { color: #7a6a48; font-size: 11px; padding: 20px 0; }
+footer { padding: 28px 22px 40px; font-size: 11px; color: #6a5a32; }
+
+@media (max-width: 980px) {
+  .boards, .card, .legs { grid-template-columns: 1fr; }
+  .mast { flex-direction: column; align-items: flex-start; }
+  h1 { font-size: 28px; }
+}
