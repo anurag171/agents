@@ -1,0 +1,334 @@
+{
+ "AAPL": [
+  "tech",
+  "tech"
+ ],
+ "ADANIENT": [
+  "conglomerate"
+ ],
+ "ADANIGREEN": [
+  "renewables"
+ ],
+ "ADANIPORTS": [
+  "ports"
+ ],
+ "ADANIPOWER": [
+  "power"
+ ],
+ "AMD": [
+  "semiconductor"
+ ],
+ "AMZN": [
+  "tech",
+  "ai"
+ ],
+ "APOLLOTYRE": [
+  "tyres"
+ ],
+ "ASHOKLEY": [
+  "cv"
+ ],
+ "ASIANPAINT": [
+  "paints"
+ ],
+ "AVGO": [
+  "semiconductor"
+ ],
+ "AXISBANK": [
+  "bank"
+ ],
+ "BA": [
+  "aerospace"
+ ],
+ "BAJAJ-AUTO": [
+  "auto"
+ ],
+ "BAJAJFINSV": [
+  "nbfc"
+ ],
+ "BAJFINANCE": [
+  "nbfc"
+ ],
+ "BEL": [
+  "defense"
+ ],
+ "BHARTIARTL": [
+  "telecom",
+  "telecom"
+ ],
+ "BHEL": [
+  "capital-goods"
+ ],
+ "BPCL": [
+  "omc"
+ ],
+ "BRITANNIA": [
+  "fmcg"
+ ],
+ "BRK.B": [
+  "conglomerate"
+ ],
+ "BSE": [
+  "exchange",
+  "exchange"
+ ],
+ "CIPLA": [
+  "pharma"
+ ],
+ "COALINDIA": [
+  "coal"
+ ],
+ "CVX": [
+  "energy"
+ ],
+ "DAL": [
+  "aviation",
+  "aviation"
+ ],
+ "DIVISLAB": [
+  "pharma"
+ ],
+ "DLF": [
+  "realty"
+ ],
+ "DMART": [
+  "retail",
+  "retail"
+ ],
+ "DRREDDY": [
+  "pharma"
+ ],
+ "EICHERMOT": [
+  "auto"
+ ],
+ "ETERNAL": [
+  "consumer-internet",
+  "consumer-internet"
+ ],
+ "GAIL": [
+  "gas"
+ ],
+ "GOLD": [
+  "gold",
+  "gold"
+ ],
+ "GOOGL": [
+  "tech",
+  "tech"
+ ],
+ "GS": [
+  "bank"
+ ],
+ "HAL": [
+  "defense"
+ ],
+ "HCLTECH": [
+  "it",
+  "it"
+ ],
+ "HDFCBANK": [
+  "bank"
+ ],
+ "HEROMOTOCO": [
+  "auto"
+ ],
+ "HINDALCO": [
+  "metals"
+ ],
+ "HINDUNILVR": [
+  "fmcg",
+  "fmcg"
+ ],
+ "HPCL": [
+  "omc"
+ ],
+ "ICICIBANK": [
+  "bank"
+ ],
+ "IDEA": [
+  "telecom"
+ ],
+ "INDIGO": [
+  "aviation",
+  "aviation"
+ ],
+ "INFY": [
+  "it",
+  "it"
+ ],
+ "INTC": [
+  "semiconductor"
+ ],
+ "IOC": [
+  "omc",
+  "omc"
+ ],
+ "IRCTC": [
+  "railways"
+ ],
+ "IRFC": [
+  "railways",
+  "railways"
+ ],
+ "ITC": [
+  "fmcg"
+ ],
+ "JPM": [
+  "bank"
+ ],
+ "JSWSTEEL": [
+  "metals"
+ ],
+ "KOTAKBANK": [
+  "bank"
+ ],
+ "LEN": [
+  "homebuilder"
+ ],
+ "LICI": [
+  "insurance"
+ ],
+ "LIN": [
+  "industrials"
+ ],
+ "LMT": [
+  "defense"
+ ],
+ "LT": [
+  "infra",
+  "infra"
+ ],
+ "M&M": [
+  "auto",
+  "auto"
+ ],
+ "MARUTI": [
+  "auto"
+ ],
+ "META": [
+  "tech"
+ ],
+ "MSFT": [
+  "tech",
+  "ai"
+ ],
+ "MU": [
+  "semiconductor"
+ ],
+ "NESTLEIND": [
+  "fmcg"
+ ],
+ "NKE": [
+  "consumer"
+ ],
+ "NSEIPO": [
+  "exchange"
+ ],
+ "NTPC": [
+  "power"
+ ],
+ "NVDA": [
+  "semiconductor",
+  "semiconductor"
+ ],
+ "OIL": [
+  "upstream"
+ ],
+ "ONGC": [
+  "upstream"
+ ],
+ "PAYTM": [
+  "fintech"
+ ],
+ "PIDILITIND": [
+  "chemicals"
+ ],
+ "POLICYBZR": [
+  "fintech",
+  "fintech"
+ ],
+ "POWERGRID": [
+  "power"
+ ],
+ "PSX": [
+  "refining"
+ ],
+ "PWR": [
+  "grid"
+ ],
+ "QQQ": [
+  "etf",
+  "etf"
+ ],
+ "RELIANCE": [
+  "energy-conglomerate",
+  "energy-conglomerate",
+  "telecom-digital",
+  "telecom-digital"
+ ],
+ "RTX": [
+  "defense"
+ ],
+ "RVNL": [
+  "railways"
+ ],
+ "SAIL": [
+  "metals"
+ ],
+ "SBIN": [
+  "bank",
+  "bank"
+ ],
+ "SHRIRAMFIN": [
+  "nbfc"
+ ],
+ "SUNPHARMA": [
+  "pharma"
+ ],
+ "SUZLON": [
+  "renewables"
+ ],
+ "TATAMOTORS": [
+  "auto"
+ ],
+ "TATAPOWER": [
+  "power"
+ ],
+ "TATASTEEL": [
+  "metals"
+ ],
+ "TCS": [
+  "it",
+  "it"
+ ],
+ "TECHM": [
+  "it"
+ ],
+ "TITAN": [
+  "consumer"
+ ],
+ "TLT": [
+  "etf",
+  "etf"
+ ],
+ "TSLA": [
+  "ev",
+  "ev"
+ ],
+ "TSM": [
+  "foundry",
+  "foundry"
+ ],
+ "ULTRACEMCO": [
+  "cement"
+ ],
+ "VEDL": [
+  "metals"
+ ],
+ "WIPRO": [
+  "it"
+ ],
+ "XOM": [
+  "energy"
+ ]
+}

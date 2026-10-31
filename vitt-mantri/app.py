@@ -8,6 +8,7 @@ from flask import Flask, Response, jsonify, render_template, request, stream_wit
 
 from engine.ai import apply_ai, configured as ai_configured, interpret_batch
 from engine.decoder import aggregate_board, decode_item
+from engine.instruments import get_universe
 from engine.scraper import scrape_all
 
 
@@ -53,6 +54,7 @@ def _pack(decoded, board, errors, coverage, updated_at, cycle, interpreter="rule
         "coverage": coverage,
         "interpreter": interpreter,
         "ai_ready": ai_configured(),
+        "universe": {"origin": get_universe().meta.get("origin"), "size": len(get_universe())},
         "news": decoded,
         "board": board,
         "buys": [r for r in board if r["action"] == "BUY"],
@@ -61,7 +63,17 @@ def _pack(decoded, board, errors, coverage, updated_at, cycle, interpreter="rule
     }
 
 
+def _http_text(url):
+    """Proxy/CA-aware fetch (honours HTTPS_PROXY, NO_PROXY, REQUESTS_CA_BUNDLE). NSE rejects bare clients."""
+    import requests
+    h = {"User-Agent": "Mozilla/5.0 (compatible; VittaMantri/2.0; research)", "Accept": "text/csv,application/json,*/*"}
+    r = requests.get(url, headers=h, timeout=(3.05, 20))
+    r.raise_for_status()
+    return r.text
+
+
 def _build():
+    get_universe(get=_http_text)      # no-op while fresh; live refresh (daily) with disk-cache/seed fallback
     raw, errors, coverage = scrape_all()
     decoded = []
     for item in raw:

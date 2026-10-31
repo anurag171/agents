@@ -1,7 +1,19 @@
 import re
 from collections import defaultdict
 
-from .universe import BEARISH_WORDS, BULLISH_WORDS, COMPANIES, SKIP_TITLES, THEMES
+from .impacts import BUCKETS, SECTOR_RULE_WEIGHT, load_theme_config, resolve
+from .instruments import get_universe
+from .universe import BEARISH_WORDS, BULLISH_WORDS, SKIP_TITLES
+
+THEMES = load_theme_config()            # keywords/negations/rules; impacts resolve against the live universe
+_RX = {}
+
+
+def _wb(phrases, min_len=3):
+    """Word-boundary alternation. Fragments shorter than min_len (e.g. 'spr') are ignored: they matched
+    'spread'/'spring' and flipped oil themes."""
+    ph = sorted({p.strip().lower() for p in phrases if p and len(p.strip()) >= min_len}, key=len, reverse=True)
+    return re.compile(r"(?<![a-z0-9])(?:%s)(?![a-z0-9])" % "|".join(map(re.escape, ph))) if ph else None
 
 
 def _norm(text):
@@ -14,25 +26,21 @@ def _skip(title):
 
 
 def _named_companies(text):
-    blob = _norm(text)
-    hits = []
-    seen = set()
-    for key, meta in sorted(COMPANIES.items(), key=lambda kv: len(kv[0]), reverse=True):
-        if re.search(rf"(?<![a-z0-9]){re.escape(key)}(?![a-z0-9])", blob):
-            if meta["ticker"] in seen:
-                continue
-            seen.add(meta["ticker"])
-            hits.append(meta)
-    return hits
+    """Dynamic: any instrument in the live universe whose name/alias/symbol appears in the text."""
+    return [{"ticker": i.symbol, "name": i.name, "sector": (i.tags[0] if i.tags else i.industry or i.asset_class),
+             "asset_class": i.asset_class} for i in get_universe().match(text or "")]
 
 
 def _theme_hits(text):
     blob = _norm(text)
     scored = []
     for tid, theme in THEMES.items():
-        if any(n in blob for n in theme.get("negations", []) if n):
+        if tid not in _RX:
+            _RX[tid] = (_wb(theme["keywords"]), _wb(theme.get("negations", []), min_len=4))
+        kw, neg = _RX[tid]
+        if neg and neg.search(blob):
             continue
-        hits = [k for k in theme["keywords"] if k in blob]
+        hits = sorted({m.group(0) for m in kw.finditer(blob)}) if kw else []
         if hits:
             scored.append((len(hits), tid, hits))
     scored.sort(reverse=True)
@@ -84,7 +92,7 @@ def decode_item(item):
     signals = []
     seen_pair = set()
 
-    def add(ticker, name, hop, action, why, theme_id, theme_score):
+    def add(ticker, name, hop, action, why, theme_id, theme_score, origin="curated"):
         action = _sentiment_nudge(blob, action)
         key = (ticker, hop, action)
         if key in seen_pair:
@@ -99,7 +107,8 @@ def decode_item(item):
                 "why": why,
                 "theme": THEMES.get(theme_id, {}).get("label", theme_id),
                 "theme_id": theme_id,
-                "confidence": _conf(theme_score, bool(named), source_grade),
+                "confidence": round(_conf(theme_score, bool(named), source_grade) * (SECTOR_RULE_WEIGHT if origin == "sector-rule" else 1.0), 2),
+                "origin": origin,
             }
         )
 
@@ -107,14 +116,12 @@ def decode_item(item):
         _, tid, kws = themes[0]
         theme = THEMES[tid]
         score = len(kws)
-        for ticker, why in theme["direct_buy"]:
-            add(ticker, ticker, "direct", "BUY", why, tid, score)
-        for ticker, why in theme["direct_sell"]:
-            add(ticker, ticker, "direct", "SELL", why, tid, score)
-        for ticker, why in theme["indirect_buy"]:
-            add(ticker, ticker, "indirect", "BUY", why, tid, score)
-        for ticker, why in theme["indirect_sell"]:
-            add(ticker, ticker, "indirect", "SELL", why, tid, score)
+        universe = get_universe()
+        resolved = resolve(theme, universe)
+        for bucket in BUCKETS:
+            hop, act = bucket.split("_")
+            for ticker, why, origin in resolved[bucket]:
+                add(ticker, universe.by_symbol[ticker].name, hop, act.upper(), why, tid, score, origin)
         meaning = theme["meaning"]
         theme_label = theme["label"]
     else:
@@ -130,6 +137,8 @@ def decode_item(item):
         if already:
             continue
         blob_l = _norm(blob)
+        if meta.get("asset_class", "equity") != "equity":
+            continue                                    # asset ETFs/FX/crypto only enter via theme rules
         if any(w in blob_l for w in BEARISH_WORDS):
             add(meta["ticker"], meta["name"], "direct", "SELL", "Issuer named in a negative print.", tid, 1)
         elif any(w in blob_l for w in BULLISH_WORDS):

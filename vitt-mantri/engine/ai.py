@@ -4,9 +4,7 @@ import re
 
 import requests
 
-from .universe import COMPANIES
-
-KNOWN = sorted({m["ticker"] for m in COMPANIES.values()})
+from .instruments import get_universe
 
 
 def configured():
@@ -56,6 +54,7 @@ def interpret_batch(decoded):
             "summary": (item.get("summary") or "")[:280],
             "theme": item.get("theme"),
             "named": [n["ticker"] for n in item.get("named") or []],
+            "candidates": sorted({x["ticker"] for x in item.get("signals") or []})[:20],
         })
     system = (
         "You are Vitta-Mantri, a forensic equity decoder. "
@@ -66,7 +65,8 @@ def interpret_batch(decoded):
         "Return JSON only: {\"items\":[{\"id\":\"...\",\"meaning\":\"one or two sentences\","
         "\"signals\":[{\"ticker\":\"TCS\",\"hop\":\"direct|indirect\",\"action\":\"BUY|SELL|WATCH\","
         "\"why\":\"short mechanism\"}]}]}. "
-        "Tickers must be from this list: " + ", ".join(KNOWN) + ". Max 8 signals per headline."
+        "Prefer each item's candidates; you may add other listed NSE/US symbols or asset ETFs only when directly "
+        "relevant. Unknown symbols are discarded. Max 8 signals per headline."
     )
     body = {
         "model": _model(),
@@ -95,7 +95,7 @@ def interpret_batch(decoded):
         if not isinstance(items, list):
             return {}, "rules"
         out = {}
-        allowed = set(KNOWN)
+        universe = get_universe()
         for row in items:
             if not isinstance(row, dict) or not row.get("id"):
                 continue
@@ -107,7 +107,7 @@ def interpret_batch(decoded):
                 hop = s.get("hop") if s.get("hop") in ("direct", "indirect") else "indirect"
                 action = s.get("action") if s.get("action") in ("BUY", "SELL", "WATCH") else "WATCH"
                 why = str(s.get("why") or "AI mapped financial impact.").strip()[:180]
-                if ticker in allowed:
+                if universe.has(ticker):
                     signals.append({"ticker": ticker, "hop": hop, "action": action, "why": why})
             out[row["id"]] = {
                 "meaning": str(row.get("meaning") or "").strip()[:420],
