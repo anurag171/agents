@@ -63,7 +63,13 @@ function fillRow(n, r) {
   const hop = num(r.direct_buy) + num(r.direct_sell) >= num(r.indirect_buy) + num(r.indirect_sell) ? "direct" : "indirect";
   const meta = mk("div", "meta");
   meta.append(mk("span", "", hop), mk("span", "", `${(r.headlines || []).length} prints`), mk("span", "", `${(r.sources || []).length} sources`));
+  if (r.market) {
+    const c = num(r.market.change_pct), cur = r.market.mkt === "US" ? "$" : "₹";
+    meta.append(mk("span", "pct " + (c >= 0 ? "up" : "down"), `${cur}${num(r.market.price).toLocaleString()} ${c >= 0 ? "+" : ""}${c.toFixed(1)}%`));
+  }
   const flags = mk("div", "flags");
+  if (r.origin === "market-mover") flags.append(mk("span", "vchip v-note", "Market-driven · no news explains it yet"));
+  ((r.market && r.market.flags) || []).forEach((f) => flags.append(mk("span", "vchip " + (f === "market disagrees" ? "v-contradict" : "v-note"), f)));
   if (r.chart && r.chart.verdict) flags.append(mk("span", "vchip v-" + r.chart.verdict.toLowerCase(), "Chart: " + r.chart.verdict.toLowerCase()));
   if (r.news_action && r.news_action !== a) flags.append(mk("span", "vchip v-note", "News said " + r.news_action));
   if (r.priced_in) flags.append(mk("span", "vchip v-wait", "Priced in"));
@@ -165,6 +171,26 @@ function renderTape() {
   $("srcCount").textContent = V.src.size ? V.src.size + " selected" : "all";
 }
 
+/* ---------- market movers ---------- */
+const PANELS = [["gainers", "Top gainers"], ["losers", "Top losers"], ["active", "Most active"], ["near_high", "Near 52-week high"], ["near_low", "Near 52-week low"], ["volume_shock", "Volume shockers"]];
+function renderMarket() {
+  const mv = DATA.movers || {}, onBoard = new Set((DATA.board || []).map((r) => r.ticker));
+  const live = (DATA.coverage || []).filter((c) => /^Market:/.test(c.source));
+  $("mktNote").textContent = live.length ? live.map((c) => `${c.source.replace("Market: ", "")}: ${num(c.raw)} quotes`).join(" · ") : "No market-data source configured.";
+  const cols = PANELS.filter(([k]) => (mv[k] || []).length).map(([k, title]) => {
+    const p = mk("div", "pan"); p.append(mk("h3", "", title));
+    (mv[k] || []).slice(0, 8).forEach((q) => {
+      const b = mk("button", "q"); b.type = "button"; b.dataset.t = q.symbol;
+      const nm = mk("span"); nm.append(mk("b", "tk", q.symbol), mk("small", "", (onBoard.has(q.symbol) ? "● on board · " : "") + (q.name || "")));
+      const c = num(q.change_pct);
+      b.append(nm, mk("span", "", (q.mkt === "US" ? "$" : "₹") + num(q.price).toLocaleString()), mk("span", "pct " + (c >= 0 ? "up" : "down"), `${c >= 0 ? "+" : ""}${c.toFixed(1)}%`));
+      p.append(b);
+    });
+    return p;
+  });
+  $("mktCols").replaceChildren(...(cols.length ? cols : [mk("p", "empty", "No live quotes yet. Configure NSE/Yahoo access or drop CSVs in VM_QUOTES_DIR.")]));
+}
+
 /* ---------- kpis, sources, status ---------- */
 function renderKpis() {
   const c = { BUY: 0, SELL: 0, WATCH: 0 };
@@ -194,7 +220,7 @@ function tick() {
   if (stale) b.textContent = `Data is stale — last update ${ago(u)}. Signals may no longer reflect the market.`;
   if (u && $("live").classList.contains("on")) $("liveText").textContent = "live · " + ago(u);
 }
-function renderAll() { renderKpis(); renderSignals(); if (V.tab === "tape") renderTape(); if (V.tab === "sources") renderSources(); }
+function renderAll() { renderKpis(); renderSignals(); if (V.tab === "market") renderMarket(); if (V.tab === "tape") renderTape(); if (V.tab === "sources") renderSources(); }
 function ingest(snap) {
   if (!snap) return;
   DATA = snap; $("skel").hidden = true; renderAll(); tick();
@@ -202,7 +228,7 @@ function ingest(snap) {
 function setTab(t) {
   V.tab = t;
   document.querySelectorAll("#tabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === t)));
-  ["signals", "tape", "sources"].forEach((v) => ($("v-" + v).hidden = v !== t));
+  ["signals", "market", "tape", "sources"].forEach((v) => ($("v-" + v).hidden = v !== t));
   renderAll();
 }
 
@@ -247,6 +273,7 @@ $("feed").addEventListener("click", (e) => {
   if (t) { (DATA.board || []).some((r) => r.ticker === t.dataset.t) ? openDrawer(t.dataset.t) : toast(t.dataset.t + " is not on the board yet"); }
   else if (m) m.classList.toggle("open");
 });
+$("mktCols").addEventListener("click", (e) => { const b = e.target.closest(".q"); if (!b) return; (DATA.board || []).some((r) => r.ticker === b.dataset.t) ? openDrawer(b.dataset.t) : toast(b.dataset.t + ": market-driven, no news signal yet"); });
 $("scrim").addEventListener("click", closeDrawer); $("dClose").addEventListener("click", closeDrawer);
 $("refresh").addEventListener("click", refresh); $("palBtn").addEventListener("click", openPal);
 $("theme").addEventListener("click", () => applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark"));
@@ -261,7 +288,7 @@ document.addEventListener("keydown", (e) => {
   const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
   if (e.key === "Escape") closeDrawer();
   else if ((e.key === "/" && !typing) || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k")) { e.preventDefault(); openPal(); }
-  else if (!typing && ["1", "2", "3"].includes(e.key)) setTab(["signals", "tape", "sources"][+e.key - 1]);
+  else if (!typing && ["1", "2", "3", "4"].includes(e.key)) setTab(["signals", "market", "tape", "sources"][+e.key - 1]);
 });
 
 /* ---------- demo data (index.html?demo=1) ---------- */
@@ -281,8 +308,11 @@ function demoData() {
   const ch = (verdict, score, rr) => ({ verdict, score, rr, entry_zone: [412.5, 428.0], stop: 401.2, target: 462.0, reasons: ["trend up (+0.35)", "momentum RSI 58 / MACD (+0.25)", "history: 61% hit over 10d in 34 analogs (+0.22)"] });
   const tk = (t) => ({ ticker: t });
   return { count: 42, cycle: 7, updated_at: now, ai_ready: true, interpreter: "rules+ai",
-    coverage: [{ source: "Economic Times", raw: 18 }, { source: "Moneycontrol", raw: 12 }, { source: "Reuters", raw: 9 }, { source: "Bloomberg", raw: 0 }],
-    board: [row("ONGC", "BUY", 3.4, 4, "Higher crude lifts upstream realisations.", { chart: ch("CONFIRM", 0.62, 2.1) }),
+    movers: { gainers: [{ symbol: "ONGC", name: "Oil & Natural Gas Corp", mkt: "IN", price: 268.4, change_pct: 3.6 }, { symbol: "ZOMATO", name: "Zomato Ltd", mkt: "IN", price: 255.1, change_pct: 5.2 }],
+        losers: [{ symbol: "INDIGO", name: "InterGlobe Aviation", mkt: "IN", price: 4310, change_pct: -2.8 }], active: [{ symbol: "NVDA", name: "NVIDIA", mkt: "US", price: 905.2, change_pct: 2.1 }] },
+      coverage: [{ source: "Market: NSE", raw: 497 }, { source: "Economic Times", raw: 18 }, { source: "Moneycontrol", raw: 12 }, { source: "Reuters", raw: 9 }, { source: "Bloomberg", raw: 0 }],
+    board: [row("ONGC", "BUY", 3.4, 4, "Higher crude lifts upstream realisations.", { chart: ch("CONFIRM", 0.62, 2.1), market: { price: 268.4, change_pct: 3.6, mkt: "IN", flags: [] } }),
+      row("ZOMATO", "WATCH", 0, 1, "Top gainer: +5.2% — no mapped news explains the move yet.", { origin: "market-mover", market: { price: 255.1, change_pct: 5.2, mkt: "IN", flags: ["volume 2.4x avg"] } }),
       row("INDIGO", "SELL", -2.9, 4, "Jet fuel costs rise with crude; margins squeezed.", { chart: ch("CONTRADICT", -0.31, 1.1), news_action: "SELL" }),
       row("RELIANCE", "WATCH", 1.1, 2, "Refining gains offset by retail softness.", { news_action: "BUY", chart: ch("WAIT", 0.18, 1.2), priced_in: true }),
       row("HDFCBANK", "BUY", 2.2, 3, "Rate pause supports net interest margin outlook.", { chart: ch("NEUTRAL", 0.1, 1.7) }),

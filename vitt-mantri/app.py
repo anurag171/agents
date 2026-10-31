@@ -9,6 +9,7 @@ from flask import Flask, Response, jsonify, render_template, request, stream_wit
 from engine.ai import apply_ai, configured as ai_configured, interpret_batch
 from engine.decoder import aggregate_board, decode_item
 from engine.instruments import get_universe
+from engine.movers import derive_lists, fetch_quotes, merge_into_board
 from engine.scraper import scrape_all
 
 
@@ -53,6 +54,7 @@ def _pack(decoded, board, errors, coverage, updated_at, cycle, interpreter="rule
         "errors": errors,
         "coverage": coverage,
         "interpreter": interpreter,
+        "movers": STATE.get("movers", {}),
         "ai_ready": ai_configured(),
         "universe": {"origin": get_universe().meta.get("origin"), "size": len(get_universe())},
         "news": decoded,
@@ -83,7 +85,12 @@ def _build():
     ai_map, interpreter = interpret_batch(decoded)
     decoded = apply_ai(decoded, ai_map, interpreter)
     board = aggregate_board(decoded)
+    quotes, market_cov = fetch_quotes()                      # cached ~2 min, never raises
+    lists = derive_lists(quotes)
+    board = merge_into_board(board, quotes, lists)           # market reaction on news rows + unexplained big movers
+    coverage = list(coverage) + market_cov
     with STATE["lock"]:
+        STATE["movers"] = lists
         STATE["news"] = decoded
         STATE["board"] = board
         STATE["errors"] = errors

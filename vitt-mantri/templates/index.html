@@ -13,6 +13,7 @@
   <div class="brand"><span class="seal">VM</span><div><b>Vitta-Mantri</b><small>News impact decoder</small></div></div>
   <nav class="tabs" id="tabs" role="tablist" aria-label="Views">
     <button role="tab" data-tab="signals" aria-selected="true">Signals</button>
+    <button role="tab" data-tab="market" aria-selected="false">Market</button>
     <button role="tab" data-tab="tape" aria-selected="false">Tape</button>
     <button role="tab" data-tab="sources" aria-selected="false">Sources</button>
   </nav>
@@ -38,6 +39,11 @@
     <div id="skel" class="list"><div class="row skel"></div><div class="row skel"></div><div class="row skel"></div></div>
     <div id="list" class="list"></div>
     <p id="emptyS" class="empty" hidden>No names match this view yet. Signals appear after the next scrape cycle.</p>
+  </section>
+
+  <section id="v-market" class="view" hidden>
+    <p class="meta" id="mktNote"></p>
+    <div class="cols" id="mktCols"></div>
   </section>
 
   <section id="v-tape" class="view" hidden>
