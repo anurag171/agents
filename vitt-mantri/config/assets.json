@@ -1,27 +1,517 @@
 {
  "_note": "Curated asset-class instruments and theme impacts. Symbols are editable and MUST be verified against your exchange lists (verified=false until checked). Equities are NOT listed here; they come from the dynamic universe.",
  "instruments": [
-  {"symbol":"GOLDBEES","name":"Gold BeES ETF","asset_class":"gold","tags":["gold"],"aliases":["goldbees","gold bees"],"verified":false},
-  {"symbol":"SILVERBEES","name":"Silver BeES ETF","asset_class":"silver","tags":["silver"],"aliases":["silverbees","silver bees"],"verified":false},
-  {"symbol":"NIFTYBEES","name":"Nifty BeES ETF","asset_class":"etf","tags":["equity_index"],"aliases":["niftybees","nifty bees"],"verified":false},
-  {"symbol":"LIQUIDBEES","name":"Liquid BeES ETF","asset_class":"etf","tags":["cash_like"],"aliases":["liquidbees"],"verified":false},
-  {"symbol":"LICNETFGSC","name":"LIC MF G-Sec ETF","asset_class":"bond","tags":["bond"],"aliases":["g-sec etf","gsec etf"],"verified":false},
-  {"symbol":"MON100","name":"Nasdaq 100 ETF (Motilal)","asset_class":"etf","tags":["us_equity"],"aliases":["mon100"],"verified":false},
-  {"symbol":"EMBASSY","name":"Embassy Office Parks REIT","asset_class":"reit","tags":["reit"],"aliases":["embassy reit","embassy office parks"],"verified":false},
-  {"symbol":"MINDSPACE","name":"Mindspace Business Parks REIT","asset_class":"reit","tags":["reit"],"aliases":["mindspace reit"],"verified":false},
-  {"symbol":"BIRET","name":"Brookfield India Real Estate Trust","asset_class":"reit","tags":["reit"],"aliases":["brookfield india reit"],"verified":false},
-  {"symbol":"USDINR","name":"USD/INR","mkt":"GL","exchange":"FX","asset_class":"fx","tags":["fx_usd"],"aliases":["usdinr","usd/inr"],"verified":false},
-  {"symbol":"BTC","name":"Bitcoin","mkt":"GL","exchange":"CRYPTO","asset_class":"crypto","tags":["crypto"],"aliases":["bitcoin"],"verified":false},
-  {"symbol":"ETH","name":"Ethereum","mkt":"GL","exchange":"CRYPTO","asset_class":"crypto","tags":["crypto"],"aliases":["ethereum"],"verified":false}
+  {
+   "symbol": "GOLDBEES",
+   "name": "Gold BeES ETF",
+   "asset_class": "gold",
+   "tags": [
+    "gold"
+   ],
+   "aliases": [
+    "goldbees",
+    "gold bees"
+   ],
+   "verified": false
+  },
+  {
+   "symbol": "SILVERBEES",
+   "name": "Silver BeES ETF",
+   "asset_class": "silver",
+   "tags": [
+    "silver"
+   ],
+   "aliases": [
+    "silverbees",
+    "silver bees"
+   ],
+   "verified": false
+  },
+  {
+   "symbol": "NIFTYBEES",
+   "name": "Nifty BeES ETF",
+   "asset_class": "etf",
+   "tags": [
+    "equity_index"
+   ],
+   "aliases": [
+    "niftybees",
+    "nifty bees"
+   ],
+   "verified": false
+  },
+  {
+   "symbol": "LIQUIDBEES",
+   "name": "Liquid BeES ETF",
+   "asset_class": "etf",
+   "tags": [
+    "cash_like"
+   ],
+   "aliases": [
+    "liquidbees"
+   ],
+   "verified": false
+  },
+  {
+   "symbol": "LICNETFGSC",
+   "name": "LIC MF G-Sec ETF",
+   "asset_class": "bond",
+   "tags": [
+    "bond"
+   ],
+   "aliases": [
+    "g-sec etf",
+    "gsec etf"
+   ],
+   "verified": false
+  },
+  {
+   "symbol": "MON100",
+   "name": "Nasdaq 100 ETF (Motilal)",
+   "asset_class": "etf",
+   "tags": [
+    "us_equity"
+   ],
+   "aliases": [
+    "mon100"
+   ],
+   "verified": false
+  },
+  {
+   "symbol": "EMBASSY",
+   "name": "Embassy Office Parks REIT",
+   "asset_class": "reit",
+   "tags": [
+    "reit"
+   ],
+   "aliases": [
+    "embassy reit",
+    "embassy office parks"
+   ],
+   "verified": false
+  },
+  {
+   "symbol": "MINDSPACE",
+   "name": "Mindspace Business Parks REIT",
+   "asset_class": "reit",
+   "tags": [
+    "reit"
+   ],
+   "aliases": [
+    "mindspace reit"
+   ],
+   "verified": false
+  },
+  {
+   "symbol": "BIRET",
+   "name": "Brookfield India Real Estate Trust",
+   "asset_class": "reit",
+   "tags": [
+    "reit"
+   ],
+   "aliases": [
+    "brookfield india reit"
+   ],
+   "verified": false
+  },
+  {
+   "symbol": "USDINR",
+   "name": "USD/INR",
+   "mkt": "GL",
+   "exchange": "FX",
+   "asset_class": "fx",
+   "tags": [
+    "fx_usd"
+   ],
+   "aliases": [
+    "usdinr",
+    "usd/inr"
+   ],
+   "verified": false
+  },
+  {
+   "symbol": "BTC",
+   "name": "Bitcoin",
+   "mkt": "GL",
+   "exchange": "CRYPTO",
+   "asset_class": "crypto",
+   "tags": [
+    "crypto"
+   ],
+   "aliases": [
+    "bitcoin"
+   ],
+   "verified": false
+  },
+  {
+   "symbol": "ETH",
+   "name": "Ethereum",
+   "mkt": "GL",
+   "exchange": "CRYPTO",
+   "asset_class": "crypto",
+   "tags": [
+    "crypto"
+   ],
+   "aliases": [
+    "ethereum"
+   ],
+   "verified": false
+  }
  ],
  "theme_rules": {
-  "gold_bid":   [{"hop":"direct","action":"BUY","tags":["gold"],"why":"Gold bid lifts gold ETFs directly.","limit":2},{"hop":"indirect","action":"BUY","tags":["silver"],"why":"Silver tends to follow gold flows.","limit":2}],
-  "rupee_weak": [{"hop":"direct","action":"BUY","tags":["fx_usd"],"why":"USDINR is the rupee move itself.","limit":1},{"hop":"indirect","action":"BUY","tags":["gold","us_equity"],"why":"INR-denominated gold and US assets gain when the rupee weakens.","limit":3}],
-  "yields_up":  [{"hop":"direct","action":"SELL","tags":["bond"],"why":"Higher yields mean falling bond prices.","limit":2},{"hop":"indirect","action":"SELL","tags":["reit"],"why":"Higher discount rates compress REIT valuations and distribution spreads.","limit":3},{"hop":"indirect","action":"SELL","tags":["gold"],"why":"Rising real yields weigh on gold.","limit":1}],
-  "fed_dovish": [{"hop":"indirect","action":"BUY","tags":["gold","crypto","reit","us_equity"],"why":"Lower real rates and liquidity support duration-sensitive and non-yielding assets.","limit":5}],
-  "rbi_hawkish":[{"hop":"direct","action":"SELL","tags":["bond"],"why":"Rate-hike risk pushes G-sec prices down.","limit":2},{"hop":"indirect","action":"SELL","tags":["reit"],"why":"Higher funding costs hit REIT valuations.","limit":3},{"hop":"indirect","action":"BUY","tags":["cash_like"],"why":"Short-term rates reprice up; liquid funds benefit.","limit":1}],
-  "fpi_out":    [{"hop":"direct","action":"SELL","tags":["equity_index"],"why":"FPI outflows pressure broad Indian equity indices.","limit":1},{"hop":"indirect","action":"BUY","tags":["gold","cash_like","fx_usd"],"why":"Risk-off flows favour havens and cash-like assets.","limit":3}],
-  "ai_boom":    [{"hop":"indirect","action":"BUY","tags":["us_equity"],"why":"AI capex cycle concentrates in US large-cap tech.","limit":1}],
-  "defense_geo":[{"hop":"indirect","action":"BUY","tags":["gold"],"why":"Geopolitical stress raises safe-haven demand.","limit":1}]
- }
+  "gold_bid": [
+   {
+    "hop": "direct",
+    "action": "BUY",
+    "tags": [
+     "gold"
+    ],
+    "why": "Gold bid lifts gold ETFs directly.",
+    "limit": 2
+   },
+   {
+    "hop": "indirect",
+    "action": "BUY",
+    "tags": [
+     "silver"
+    ],
+    "why": "Silver tends to follow gold flows.",
+    "limit": 2
+   }
+  ],
+  "rupee_weak": [
+   {
+    "hop": "direct",
+    "action": "BUY",
+    "tags": [
+     "fx_usd"
+    ],
+    "why": "USDINR is the rupee move itself.",
+    "limit": 1
+   },
+   {
+    "hop": "indirect",
+    "action": "BUY",
+    "tags": [
+     "gold",
+     "us_equity"
+    ],
+    "why": "INR-denominated gold and US assets gain when the rupee weakens.",
+    "limit": 3
+   }
+  ],
+  "yields_up": [
+   {
+    "hop": "direct",
+    "action": "SELL",
+    "tags": [
+     "bond"
+    ],
+    "why": "Higher yields mean falling bond prices.",
+    "limit": 2
+   },
+   {
+    "hop": "indirect",
+    "action": "SELL",
+    "tags": [
+     "reit"
+    ],
+    "why": "Higher discount rates compress REIT valuations and distribution spreads.",
+    "limit": 3
+   },
+   {
+    "hop": "indirect",
+    "action": "SELL",
+    "tags": [
+     "gold"
+    ],
+    "why": "Rising real yields weigh on gold.",
+    "limit": 1
+   }
+  ],
+  "fed_dovish": [
+   {
+    "hop": "indirect",
+    "action": "BUY",
+    "tags": [
+     "gold",
+     "crypto",
+     "reit",
+     "us_equity"
+    ],
+    "why": "Lower real rates and liquidity support duration-sensitive and non-yielding assets.",
+    "limit": 5
+   }
+  ],
+  "rbi_hawkish": [
+   {
+    "hop": "direct",
+    "action": "SELL",
+    "tags": [
+     "bond"
+    ],
+    "why": "Rate-hike risk pushes G-sec prices down.",
+    "limit": 2
+   },
+   {
+    "hop": "indirect",
+    "action": "SELL",
+    "tags": [
+     "reit"
+    ],
+    "why": "Higher funding costs hit REIT valuations.",
+    "limit": 3
+   },
+   {
+    "hop": "indirect",
+    "action": "BUY",
+    "tags": [
+     "cash_like"
+    ],
+    "why": "Short-term rates reprice up; liquid funds benefit.",
+    "limit": 1
+   }
+  ],
+  "fpi_out": [
+   {
+    "hop": "direct",
+    "action": "SELL",
+    "tags": [
+     "equity_index"
+    ],
+    "why": "FPI outflows pressure broad Indian equity indices.",
+    "limit": 1
+   },
+   {
+    "hop": "indirect",
+    "action": "BUY",
+    "tags": [
+     "gold",
+     "cash_like",
+     "fx_usd"
+    ],
+    "why": "Risk-off flows favour havens and cash-like assets.",
+    "limit": 3
+   },
+   {
+    "hop": "indirect",
+    "action": "BUY",
+    "tags": [
+     "vix"
+    ],
+    "why": "Risk-off flows lift volatility.",
+    "limit": 1
+   }
+  ],
+  "ai_boom": [
+   {
+    "hop": "indirect",
+    "action": "BUY",
+    "tags": [
+     "us_equity"
+    ],
+    "why": "AI capex cycle concentrates in US large-cap tech.",
+    "limit": 1
+   }
+  ],
+  "defense_geo": [
+   {
+    "hop": "indirect",
+    "action": "BUY",
+    "tags": [
+     "gold"
+    ],
+    "why": "Geopolitical stress raises safe-haven demand.",
+    "limit": 1
+   }
+  ],
+  "oil_up": [
+   {
+    "hop": "direct",
+    "action": "BUY",
+    "tags": [
+     "crude",
+     "natgas"
+    ],
+    "why": "Energy price rise lifts crude and gas directly.",
+    "limit": 2
+   }
+  ],
+  "oil_down": [
+   {
+    "hop": "direct",
+    "action": "SELL",
+    "tags": [
+     "crude",
+     "natgas"
+    ],
+    "why": "Energy price fall pulls crude and gas down directly.",
+    "limit": 2
+   }
+  ]
+ },
+ "market": [
+  {
+   "key": "gold",
+   "label": "Gold",
+   "cls": "Commodity",
+   "yahoo": "GC=F",
+   "unit": "USD/oz",
+   "tags": [
+    "gold"
+   ]
+  },
+  {
+   "key": "silver",
+   "label": "Silver",
+   "cls": "Commodity",
+   "yahoo": "SI=F",
+   "unit": "USD/oz",
+   "tags": [
+    "silver"
+   ]
+  },
+  {
+   "key": "brent",
+   "label": "Brent crude",
+   "cls": "Commodity",
+   "yahoo": "BZ=F",
+   "unit": "USD/bbl",
+   "tags": [
+    "crude"
+   ]
+  },
+  {
+   "key": "wti",
+   "label": "WTI crude",
+   "cls": "Commodity",
+   "yahoo": "CL=F",
+   "unit": "USD/bbl",
+   "tags": [
+    "crude"
+   ]
+  },
+  {
+   "key": "natgas",
+   "label": "Natural gas",
+   "cls": "Commodity",
+   "yahoo": "NG=F",
+   "unit": "USD/mmbtu",
+   "tags": [
+    "natgas"
+   ]
+  },
+  {
+   "key": "copper",
+   "label": "Copper",
+   "cls": "Commodity",
+   "yahoo": "HG=F",
+   "unit": "USD/lb",
+   "tags": [
+    "copper"
+   ]
+  },
+  {
+   "key": "usdinr",
+   "label": "USD/INR",
+   "cls": "Currency",
+   "yahoo": "INR=X",
+   "unit": "INR",
+   "tags": [
+    "fx_usd"
+   ]
+  },
+  {
+   "key": "dxy",
+   "label": "US Dollar Index",
+   "cls": "Currency",
+   "yahoo": "DX-Y.NYB",
+   "unit": "pts",
+   "tags": [
+    "fx_usd"
+   ]
+  },
+  {
+   "key": "us10y",
+   "label": "US 10Y yield",
+   "cls": "Rates",
+   "yahoo": "^TNX",
+   "unit": "%",
+   "tags": [
+    "bond"
+   ],
+   "invert": true,
+   "note": "Rising yield = falling bond prices"
+  },
+  {
+   "key": "indiavix",
+   "label": "India VIX",
+   "cls": "Volatility",
+   "yahoo": "^INDIAVIX",
+   "unit": "pts",
+   "tags": [
+    "vix"
+   ]
+  },
+  {
+   "key": "nifty",
+   "label": "Nifty 50",
+   "cls": "Index",
+   "yahoo": "^NSEI",
+   "unit": "pts",
+   "tags": [
+    "equity_index"
+   ]
+  },
+  {
+   "key": "sensex",
+   "label": "Sensex",
+   "cls": "Index",
+   "yahoo": "^BSESN",
+   "unit": "pts",
+   "tags": [
+    "equity_index"
+   ]
+  },
+  {
+   "key": "spx",
+   "label": "S&P 500",
+   "cls": "Index",
+   "yahoo": "^GSPC",
+   "unit": "pts",
+   "tags": [
+    "us_equity"
+   ]
+  },
+  {
+   "key": "ndx",
+   "label": "Nasdaq Composite",
+   "cls": "Index",
+   "yahoo": "^IXIC",
+   "unit": "pts",
+   "tags": [
+    "us_equity"
+   ]
+  },
+  {
+   "key": "btc",
+   "label": "Bitcoin",
+   "cls": "Crypto",
+   "yahoo": "BTC-USD",
+   "unit": "USD",
+   "tags": [
+    "crypto"
+   ]
+  },
+  {
+   "key": "eth",
+   "label": "Ethereum",
+   "cls": "Crypto",
+   "yahoo": "ETH-USD",
+   "unit": "USD",
+   "tags": [
+    "crypto"
+   ]
+  }
+ ]
 }

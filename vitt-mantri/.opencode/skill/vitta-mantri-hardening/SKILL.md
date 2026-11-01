@@ -303,3 +303,13 @@ P0 (0.5 d) -> P1 (2 d) -> P2 (1 d) -> P3 (2 d) -> P4 (1 d) -> P5 (1.5 d) -> P6 (
 - [ ] Runs offline from fixtures and as non-root arbitrary UID on OpenShift
 - [ ] CI green: lint, tests, coverage, `pip-audit`, grep-guard for `innerHTML`
 - [ ] Disclaimers and kill-switch present
+
+## 8. Implementation status (branch feat/dynamic-universe-ipo-assets-ui)
+
+Done and tested: P0 partial (UI XSS-safe, POST-only refresh with optional `VM_ADMIN_TOKEN`, word-boundary theme matching),
+dynamic universe + sector-rule impacts, P6A chart confirmation wired into the live board (`engine/chartgate.py`, `/api/chart/<ticker>`),
+market-mover layer (`engine/movers.py`), asset-class board (`engine/assets_feed.py`), IPO feed + insights (`engine/ipo_feed.py`, `engine/ipo.py`), UI tabs (Signals, Market, Assets, IPOs, Tape, Sources).
+
+Still open (do next, in this order): single scheduler across gunicorn workers; scraper timeouts/retries/circuit breakers/parallelism (P1);
+cross-outlet event clustering (P2); signals log + backtest + A/B of chart verdicts (P6); structured logging/metrics/Docker non-root (P7).
+Unverified from the build sandbox (check on first run): NSE/Yahoo endpoint formats - failures show up as `error` in `/api/briefing` coverage.

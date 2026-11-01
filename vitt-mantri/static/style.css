@@ -84,6 +84,11 @@ dialog li.sel,dialog li:hover{background:var(--surface-2)}dialog small{color:var
 .q{display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:center;width:100%;background:none;border:0;border-top:1px solid var(--line);padding:8px 2px;text-align:left}
 .q:first-of-type{border-top:0}.q:hover{background:var(--surface-2)}.q small{display:block;color:var(--muted);font-size:11px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pct{font-weight:600;font-variant-numeric:tabular-nums}.pct.up{color:var(--buy)}.pct.down{color:var(--sell)}
+.arow{display:grid;grid-template-columns:1fr 96px auto;gap:10px;align-items:center;border-top:1px solid var(--line);padding:9px 2px}.arow:first-of-type{border-top:0}
+.arow small{display:block;color:var(--muted);font-size:11px}.spark{color:var(--muted)}.spark.up{color:var(--buy)}.spark.down{color:var(--sell)}.ev{grid-column:1/-1;margin:-2px 0 0;font-size:12px;color:var(--muted)}
+.sbar{height:6px;background:var(--line);border-radius:3px;margin:4px 0 8px}.sbar i{display:block;height:100%;width:var(--w);background:var(--accent);border-radius:3px}
+.scores{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:8px 0}.scores span{font-size:12px;color:var(--muted)}.scores b{float:right;color:var(--ink)}
+.card details{margin-top:6px;font-size:13px;color:var(--muted)}.card details li{margin:2px 0}.warn{font-size:12px;color:var(--watch);margin:4px 0}
 @media(max-width:860px){.kpis{grid-template-columns:repeat(3,1fr)}.brand small,#palBtn{display:none}}
 @media(max-width:760px){
  main{padding:14px 14px calc(76px + env(safe-area-inset-bottom))}.top{padding-inline:14px}

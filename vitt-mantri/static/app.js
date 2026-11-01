@@ -191,6 +191,64 @@ function renderMarket() {
   $("mktCols").replaceChildren(...(cols.length ? cols : [mk("p", "empty", "No live quotes yet. Configure NSE/Yahoo access or drop CSVs in VM_QUOTES_DIR.")]));
 }
 
+/* ---------- assets ---------- */
+const fmt = (v) => num(v).toLocaleString(undefined, { maximumFractionDigits: num(v) < 10 ? 3 : 2 });
+const signed = (v, d = 1) => (v == null ? "–" : `${num(v) >= 0 ? "+" : ""}${num(v).toFixed(d)}%`);
+function renderAssets() {
+  const groups = {};
+  (DATA.assets || []).forEach((a) => (groups[a.cls] = groups[a.cls] || []).push(a));
+  const cols = Object.keys(groups).map((cls) => {
+    const p = mk("div", "pan"); p.append(mk("h3", "", cls));
+    groups[cls].forEach((a) => {
+      const row = mk("div", "arow"), name = mk("span");
+      name.append(mk("b", "", a.label), mk("small", "", a.available ? `${a.unit} · 5d ${signed(a.chg_5d)} · 20d ${signed(a.chg_20d)}` : "no live data"));
+      const sp = mk("span", "spark " + (a.trend || "")); if (a.available && window.renderChart) window.renderChart(sp, { close: a.spark }, 96, 30);
+      const px = mk("span"); px.style.textAlign = "right";
+      if (a.available) { px.append(mk("b", "", fmt(a.price)), mk("small", "pct " + (num(a.change_pct) >= 0 ? "up" : "down"), signed(a.change_pct))); }
+      row.append(name, sp, px);
+      const fl = mk("div", "flags ev");
+      if (a.action === "BUY" || a.action === "SELL") fl.append(chip(a.action, null));
+      if (a.news_action) fl.append(mk("span", "vchip v-note", "News said " + a.news_action));
+      if (a.chart && a.chart.verdict) fl.append(mk("span", "vchip v-" + a.chart.verdict.toLowerCase(), "Chart: " + a.chart.verdict.toLowerCase()));
+      if (a.note) fl.append(mk("span", "", a.note));
+      const e = (a.evidence || [])[0]; if (e) fl.append(mk("span", "", `${e.theme}: ${e.why}`));
+      row.append(fl); p.append(row);
+    });
+    return p;
+  });
+  $("assetCols").replaceChildren(...(cols.length ? cols : [mk("p", "empty", "No asset data yet.")]));
+}
+
+/* ---------- IPOs ---------- */
+const VCLS = { FAVOURABLE: "v-confirm", CAUTION: "v-contradict", NEUTRAL: "v-neutral", "INSUFFICIENT DATA": "v-unavailable" };
+function scoreBar(label, v) { const d = mk("div"); d.append(mk("span", "", label), mk("b", "", Math.round(num(v)))); const b = mk("div", "sbar"); b.style.setProperty("--w", Math.max(0, Math.min(100, num(v))) + "%"); b.append(mk("i")); d.append(b); return d; }
+function fillIpo(n, d) {
+  n.className = "card";
+  const t = d.terms || {}, top = mk("div", "top2");
+  top.append(mk("span", "chip " + (d.status === "open" ? "buy" : "watch"), (d.status || "").toUpperCase()),
+    mk("span", "", [t.open && "opens " + t.open, t.close && "closes " + t.close].filter(Boolean).join(" · ")),
+    mk("span", "", d.price_band ? `band ₹${d.price_band[0]}–${d.price_band[1]}` : ""), mk("span", "", t.min_investment ? `min ₹${num(t.min_investment).toLocaleString()}` : ""));
+  const h = mk("h3"); if (d.url) { const l = mk("a", "", d.name); l.href = safeUrl(d.url); l.target = "_blank"; l.rel = "noopener noreferrer"; h.append(l); } else h.textContent = d.name;
+  const v = mk("div", "flags"); v.append(mk("span", "vchip " + (VCLS[d.verdict] || "v-note"), d.verdict), mk("span", "", `data coverage ${Math.round(num(d.coverage) * 100)}%`), mk("span", "", "sources: " + (d.sources || []).join(", ")));
+  const parts = [top, h, v];
+  if (d.verdict === "INSUFFICIENT DATA") parts.push(mk("p", "warn", "Not enough fundamentals to score. Add valuation, profitability and use-of-proceeds data via VM_IPO_DIR."));
+  else { const sc = mk("div", "scores"); sc.append(scoreBar("Listing-day view", d.listing_score), scoreBar("Long-term view", d.longterm_score)); parts.push(sc); }
+  const sub = d.subscription || {}; if (sub.total != null) parts.push(mk("p", "meta", `Subscribed ${num(sub.total)}x overall` + (sub.qib != null ? ` · QIB ${num(sub.qib)}x` : "")));
+  if (d.gmp_pct != null) parts.push(mk("p", "meta", `Grey-market premium ${signed(d.gmp_pct)} (unofficial, not scored)`));
+  (d.flags || []).filter((f) => !/^GMP/.test(f)).forEach((f) => parts.push(mk("p", "warn", "⚠ " + f)));
+  const all = [...((d.factors || {}).listing || []).map((f) => ["Listing", f]), ...((d.factors || {}).longterm || []).map((f) => ["Long-term", f])];
+  if (all.length) { const det = mk("details"); det.append(mk("summary", "", "Why these scores")); const ul = mk("ul"); all.forEach(([k, f]) => ul.append(mk("li", "", `${k} · ${f.factor} (${f.points >= 0 ? "+" : ""}${f.points}): ${f.why}`))); det.append(ul); parts.push(det); }
+  if (d.listing_gain_pct != null) parts.push(mk("p", "meta", `Listing gain vs issue price: ${signed(d.listing_gain_pct)}`));
+  parts.push(mk("p", "meta", d.disclaimer || "Educational summary, not advice."));
+  n.replaceChildren(...parts);
+}
+function renderIpos() {
+  const items = DATA.ipos || [], open = items.filter((i) => i.status === "open").length;
+  $("ipoNote").textContent = items.length ? `${items.length} issues · ${open} open now. Scores are rule-based and show their working; grey-market premium is never scored.` : "";
+  sync($("ipoList"), items, (d) => d.name, () => mk("article"), fillIpo);
+  $("emptyI").hidden = items.length > 0;
+}
+
 /* ---------- kpis, sources, status ---------- */
 function renderKpis() {
   const c = { BUY: 0, SELL: 0, WATCH: 0 };
@@ -220,7 +278,7 @@ function tick() {
   if (stale) b.textContent = `Data is stale — last update ${ago(u)}. Signals may no longer reflect the market.`;
   if (u && $("live").classList.contains("on")) $("liveText").textContent = "live · " + ago(u);
 }
-function renderAll() { renderKpis(); renderSignals(); if (V.tab === "market") renderMarket(); if (V.tab === "tape") renderTape(); if (V.tab === "sources") renderSources(); }
+function renderAll() { renderKpis(); renderSignals(); if (V.tab === "market") renderMarket(); if (V.tab === "assets") renderAssets(); if (V.tab === "ipos") renderIpos(); if (V.tab === "tape") renderTape(); if (V.tab === "sources") renderSources(); }
 function ingest(snap) {
   if (!snap) return;
   DATA = snap; $("skel").hidden = true; renderAll(); tick();
@@ -228,7 +286,7 @@ function ingest(snap) {
 function setTab(t) {
   V.tab = t;
   document.querySelectorAll("#tabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === t)));
-  ["signals", "market", "tape", "sources"].forEach((v) => ($("v-" + v).hidden = v !== t));
+  ["signals", "market", "assets", "ipos", "tape", "sources"].forEach((v) => ($("v-" + v).hidden = v !== t));
   renderAll();
 }
 
@@ -288,7 +346,7 @@ document.addEventListener("keydown", (e) => {
   const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
   if (e.key === "Escape") closeDrawer();
   else if ((e.key === "/" && !typing) || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k")) { e.preventDefault(); openPal(); }
-  else if (!typing && ["1", "2", "3", "4"].includes(e.key)) setTab(["signals", "market", "tape", "sources"][+e.key - 1]);
+  else if (!typing && ["1", "2", "3", "4", "5", "6"].includes(e.key)) setTab(["signals", "market", "assets", "ipos", "tape", "sources"][+e.key - 1]);
 });
 
 /* ---------- demo data (index.html?demo=1) ---------- */
@@ -302,6 +360,7 @@ function demoChart(a) {
     entry_zone: [+(last * 0.96).toFixed(2), +(last * 1.01).toFixed(2)] };
 }
 function demoData() {
+  const sp = (a, b) => Array.from({ length: 40 }, (_, i) => a + ((b - a) * i) / 39 + Math.sin(i / 3) * (b - a) * 0.05);
   const now = new Date().toISOString();
   const row = (ticker, action, net, conviction, why, x = {}) => ({ ticker, action, net, conviction, why, whys: [why], sources: ["Reuters", "Economic Times"], regions: ["Global"],
     headlines: ["Brent crude jumps 4% as Hormuz tensions flare", "RBI holds repo rate, keeps stance neutral"], direct_buy: action === "BUY" ? 2 : 0, direct_sell: action === "SELL" ? 2 : 0, indirect_buy: 0, indirect_sell: 0, ...x });
@@ -310,6 +369,16 @@ function demoData() {
   return { count: 42, cycle: 7, updated_at: now, ai_ready: true, interpreter: "rules+ai",
     movers: { gainers: [{ symbol: "ONGC", name: "Oil & Natural Gas Corp", mkt: "IN", price: 268.4, change_pct: 3.6 }, { symbol: "ZOMATO", name: "Zomato Ltd", mkt: "IN", price: 255.1, change_pct: 5.2 }],
         losers: [{ symbol: "INDIGO", name: "InterGlobe Aviation", mkt: "IN", price: 4310, change_pct: -2.8 }], active: [{ symbol: "NVDA", name: "NVIDIA", mkt: "US", price: 905.2, change_pct: 2.1 }] },
+      assets: [
+        { key: "gold", label: "Gold", cls: "Commodity", unit: "USD/oz", available: true, price: 2650.4, change_pct: 0.8, chg_5d: 2.1, chg_20d: 4.5, trend: "up", spark: sp(2480, 2650), action: "BUY", news_score: 2.6, evidence: [{ theme: "Gold bid", effect: "BUY", why: "Safe-haven demand", items: 2 }], chart: { verdict: "CONFIRM" } },
+        { key: "brent", label: "Brent crude", cls: "Commodity", unit: "USD/bbl", available: true, price: 88.2, change_pct: 2.6, chg_5d: 5.0, chg_20d: 9.1, trend: "up", spark: sp(78, 88), action: "WATCH", news_score: 1.0, evidence: [] },
+        { key: "us10y", label: "US 10Y yield", cls: "Rates", unit: "%", note: "Rising yield = falling bond prices", available: true, price: 4.31, change_pct: -0.7, chg_5d: -1.2, chg_20d: 2.0, trend: "down", spark: sp(4.4, 4.31), action: "WATCH", news_score: 0, evidence: [] },
+        { key: "btc", label: "Bitcoin", cls: "Crypto", unit: "USD", available: false, action: "WATCH", news_score: 0, evidence: [] }],
+      ipos: [
+        { name: "Acme Fasteners", status: "open", verdict: "FAVOURABLE", listing_score: 74, longterm_score: 68, coverage: 0.8, sources: ["file", "nse"], price_band: [100, 105], url: "https://example.com/acme",
+          terms: { open: "20-Oct-2026", close: "23-Oct-2026", min_investment: 14910 }, subscription: { total: 12.5, qib: 18 }, gmp_pct: 19, flags: ["GMP +19% is unofficial and can be manipulated; not scored"],
+          factors: { listing: [{ factor: "demand", points: 12, why: "subscribed 12.5x overall" }], longterm: [{ factor: "valuation", points: 18, why: "P/E 18 vs peers 25" }] }, disclaimer: "Educational summary, not advice." },
+        { name: "Zed Tech", status: "upcoming", verdict: "INSUFFICIENT DATA", listing_score: 50, longterm_score: 50, coverage: 0.1, sources: ["news"], price_band: [50, 52], terms: {}, subscription: {}, flags: [], factors: { listing: [], longterm: [] } }],
       coverage: [{ source: "Market: NSE", raw: 497 }, { source: "Economic Times", raw: 18 }, { source: "Moneycontrol", raw: 12 }, { source: "Reuters", raw: 9 }, { source: "Bloomberg", raw: 0 }],
     board: [row("ONGC", "BUY", 3.4, 4, "Higher crude lifts upstream realisations.", { chart: ch("CONFIRM", 0.62, 2.1), market: { price: 268.4, change_pct: 3.6, mkt: "IN", flags: [] } }),
       row("ZOMATO", "WATCH", 0, 1, "Top gainer: +5.2% — no mapped news explains the move yet.", { origin: "market-mover", market: { price: 255.1, change_pct: 5.2, mkt: "IN", flags: ["volume 2.4x avg"] } }),

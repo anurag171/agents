@@ -14,6 +14,8 @@
   <nav class="tabs" id="tabs" role="tablist" aria-label="Views">
     <button role="tab" data-tab="signals" aria-selected="true">Signals</button>
     <button role="tab" data-tab="market" aria-selected="false">Market</button>
+    <button role="tab" data-tab="assets" aria-selected="false">Assets</button>
+    <button role="tab" data-tab="ipos" aria-selected="false">IPOs</button>
     <button role="tab" data-tab="tape" aria-selected="false">Tape</button>
     <button role="tab" data-tab="sources" aria-selected="false">Sources</button>
   </nav>
@@ -44,6 +46,17 @@
   <section id="v-market" class="view" hidden>
     <p class="meta" id="mktNote"></p>
     <div class="cols" id="mktCols"></div>
+  </section>
+
+  <section id="v-assets" class="view" hidden>
+    <p class="meta">Commodities, currencies, rates, indices and crypto: live price, 20-day trend, news pressure from today's themes, and a chart check.</p>
+    <div class="cols" id="assetCols"></div>
+  </section>
+
+  <section id="v-ipos" class="view" hidden>
+    <p class="meta" id="ipoNote"></p>
+    <div class="feed" id="ipoList"></div>
+    <p id="emptyI" class="empty" hidden>No IPO activity found. Sources: NSE issue lists, IPO headlines, and files in VM_IPO_DIR.</p>
   </section>
 
   <section id="v-tape" class="view" hidden>
