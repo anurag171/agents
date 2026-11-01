@@ -147,6 +147,7 @@ function fillCard(n, it) {
   const t = mk("div", "top2");
   t.append(mk("span", "", `${it.region || ""} · ${it.source} · grade ${it.source_grade ?? "–"}`), mk("span", "", ago(it.published_at || it.fetched_at)),
     mk("span", "", it.theme || ""), mk("span", "badge" + (it.interpreted_by === "ai" ? " ai" : ""), it.interpreted_by === "ai" ? "AI" : "rules"));
+  if (num(it.n_sources) > 1) { const b = mk("span", "badge ai", `+${num(it.n_sources) - 1} outlets`); b.title = "Also reported by: " + (it.sources || []).join(", "); t.append(b); }
   const h = mk("h3"), l = mk("a", "", it.title); l.href = safeUrl(it.url); l.target = "_blank"; l.rel = "noopener noreferrer"; h.append(l);
   const m = mk("p", "meaning", it.meaning || ""); m.title = "Click to expand";
   const legs = mk("div", "legs");
@@ -388,7 +389,7 @@ function demoData() {
       row("TCS", "SELL", -1.8, 2, "Stronger rupee trims USD revenue translation.", { regions: ["India"] })],
     news: [{ id: "1", source: "Reuters", region: "Global", source_grade: "A", theme: "oil_up", interpreted_by: "ai", published_at: now, url: "https://example.com/1",
       title: "Brent crude jumps 4% as Hormuz tensions flare", meaning: "Higher oil raises costs for airlines and paints but lifts upstream producers' realisations.",
-      direct_buy: [tk("ONGC")], direct_sell: [tk("INDIGO")], indirect_buy: [], indirect_sell: [tk("ASIANPAINT")] },
+      n_sources: 3, sources: ["Reuters", "Moneycontrol", "Economic Times"], direct_buy: [tk("ONGC")], direct_sell: [tk("INDIGO")], indirect_buy: [], indirect_sell: [tk("ASIANPAINT")] },
     { id: "2", source: "Economic Times", region: "India", source_grade: "B", theme: "rbi_pause", interpreted_by: "rules", published_at: now, url: "https://example.com/2",
       title: "RBI holds repo rate, keeps stance neutral", meaning: "A pause supports rate-sensitive sectors and bank margins.",
       direct_buy: [tk("HDFCBANK")], direct_sell: [], indirect_buy: [tk("HDFC")], indirect_sell: [] }] };

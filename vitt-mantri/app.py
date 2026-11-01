@@ -8,7 +8,10 @@ from datetime import datetime, timezone
 from flask import Flask, Response, jsonify, render_template, request, stream_with_context
 
 from engine.ai import apply_ai, configured as ai_configured, interpret_batch
-from engine.decoder import aggregate_board, decode_item
+from engine import snapshot as snapfile
+from engine.cluster import cluster_items
+from engine.decoder import aggregate_board, decode_item, grade_of
+from engine.locks import FileLock
 from engine.instruments import get_universe
 from engine.assets_feed import build_assets
 from engine.chartgate import chart_for, enrich_board
@@ -48,6 +51,10 @@ STATE = {
 }
 
 REFRESH_SECONDS = 90
+DATA_DIR = os.getenv("VM_DATA", "data")
+ROLE = os.getenv("VM_ROLE", "all")                      # all | scheduler | web  (web = never scrapes, only serves)
+SNAP_PATH = os.path.join(DATA_DIR, "snapshot.json")
+SCHED = {"pid": None, "lock": None, "active": False}
 
 
 def _pack(decoded, board, errors, coverage, updated_at, cycle, interpreter="rules"):
@@ -83,8 +90,10 @@ def _http_text(url):
 def _build():
     get_universe(get=_http_text)      # no-op while fresh; live refresh (daily) with disk-cache/seed fallback
     raw, errors, coverage = scrape_all()
+    events = cluster_items(raw, grade_of)                    # same story from N outlets -> ONE event (+ corroboration)
+    coverage = list(coverage) + [{"source": "Events", "raw": len(events), "articles": len(raw)}]
     decoded = []
-    for item in raw:
+    for item in events:
         parsed = decode_item(item)
         if parsed:
             decoded.append(parsed)
@@ -107,26 +116,40 @@ def _build():
         STATE["interpreter"] = interpreter
         STATE["updated_at"] = datetime.now(timezone.utc).isoformat()
         STATE["cycle"] += 1
-        return _pack(decoded, board, errors, coverage, STATE["updated_at"], STATE["cycle"], interpreter)
+        snap = _pack(decoded, board, errors, coverage, STATE["updated_at"], STATE["cycle"], interpreter)
+    try:
+        snapfile.write(SNAP_PATH, snap)                      # every gunicorn worker serves this one shared snapshot
+    except OSError as exc:
+        snap.setdefault("errors", []).append(f"snapshot write failed: {exc}")
+    return snap
 
 
 def _snapshot():
+    """Web workers don't scrape: they serve the snapshot the scheduler process wrote (falls back to local state)."""
+    shared = snapfile.read(SNAP_PATH)
+    if shared is not None:
+        return dict(shared)
     with STATE["lock"]:
-        return _pack(
-            list(STATE["news"]),
-            list(STATE["board"]),
-            list(STATE["errors"]),
-            list(STATE["coverage"]),
-            STATE["updated_at"],
-            STATE["cycle"],
-            STATE.get("interpreter") or "rules",
-        )
+        return _pack(list(STATE["news"]), list(STATE["board"]), list(STATE["errors"]), list(STATE["coverage"]),
+                     STATE["updated_at"], STATE["cycle"], STATE.get("interpreter") or "rules")
+
+
+def _build_exclusive():
+    """Only one process builds at a time (scheduler tick vs a manual refresh landing on another worker)."""
+    lk = FileLock(os.path.join(DATA_DIR, "build.lock"))
+    if not lk.acquire():
+        snap = _snapshot(); snap["busy"] = True
+        return snap
+    try:
+        return _build()
+    finally:
+        lk.release()
 
 
 def _loop():
     while True:
         try:
-            _build()
+            _build_exclusive()
         except Exception as exc:
             with STATE["lock"]:
                 STATE["errors"] = [str(exc)]
@@ -140,7 +163,8 @@ def home():
 
 @app.route("/health")
 def health():
-    return jsonify({"ok": True, "updated_at": STATE["updated_at"], "cycle": STATE["cycle"]})
+    snap = _snapshot()
+    return jsonify({"ok": True, "updated_at": snap.get("updated_at"), "cycle": snap.get("cycle"), "role": ROLE, "scheduler_here": SCHED["active"], "pid": os.getpid()})
 
 
 @app.route("/api/briefing")
@@ -165,7 +189,7 @@ def refresh():
     tok = os.getenv("VM_ADMIN_TOKEN", "")
     if tok and not hmac.compare_digest(request.headers.get("X-Admin-Token", ""), tok):
         return jsonify({"error": "unauthorized"}), 401
-    return jsonify(_build())
+    return jsonify(_build_exclusive())
 
 
 @app.route("/api/chart/<ticker>")
@@ -181,9 +205,9 @@ def stream():
         last = -1
         while True:
             snap = _snapshot()
-            cycle = snap.get("cycle") or 0
-            if cycle != last:
-                last = cycle
+            token = (snap.get("cycle"), snap.get("updated_at"))      # cycle numbers differ across processes
+            if token != last:
+                last = token
                 yield f"data: {json.dumps(snap)}\n\n"
             else:
                 yield ": ping\n\n"
@@ -195,13 +219,36 @@ def stream():
     })
 
 
-def start_worker():
-    t = threading.Thread(target=_loop, daemon=True)
-    t.start()
+def _try_schedule():
+    """Try to become THE scheduler (non-blocking, process-wide election via flock)."""
+    lk = FileLock(os.path.join(DATA_DIR, "scheduler.lock"))
+    if lk.acquire():
+        SCHED["lock"], SCHED["active"] = lk, True
+        return True
+    return False
 
 
-start_worker()
+def _supervisor():
+    """Every process runs this; exactly one wins and scrapes. If the winner dies the OS frees the lock and another
+    worker takes over within ~15 s."""
+    while True:
+        if not SCHED["active"] and _try_schedule():
+            _loop()                                      # never returns
+        time.sleep(15)
 
-if __name__ == "__main__":
-    threading.Thread(target=_build, daemon=True).start()
-    app.run(host="0.0.0.0", port=8000, debug=False, threaded=True)
+
+def _ensure_supervisor():
+    """Idempotent per process; also correct after fork (gunicorn --preload) because it keys on the pid."""
+    if ROLE == "web" or SCHED["pid"] == os.getpid():
+        return
+    SCHED.update(pid=os.getpid(), lock=None, active=False)
+    threading.Thread(target=_supervisor, daemon=True, name="vm-scheduler").start()
+
+
+@app.before_request
+def _boot():
+    _ensure_supervisor()
+
+
+start_worker = _ensure_supervisor            # backwards-compatible name
+_ensure_supervisor()

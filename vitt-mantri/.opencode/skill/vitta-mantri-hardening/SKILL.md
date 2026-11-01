@@ -310,6 +310,10 @@ Done and tested: P0 partial (UI XSS-safe, POST-only refresh with optional `VM_AD
 dynamic universe + sector-rule impacts, P6A chart confirmation wired into the live board (`engine/chartgate.py`, `/api/chart/<ticker>`),
 market-mover layer (`engine/movers.py`), asset-class board (`engine/assets_feed.py`), IPO feed + insights (`engine/ipo_feed.py`, `engine/ipo.py`), UI tabs (Signals, Market, Assets, IPOs, Tape, Sources).
 
-Still open (do next, in this order): single scheduler across gunicorn workers; scraper timeouts/retries/circuit breakers/parallelism (P1);
-cross-outlet event clustering (P2); signals log + backtest + A/B of chart verdicts (P6); structured logging/metrics/Docker non-root (P7).
+Also done: single scheduler across gunicorn workers (flock election + shared atomic snapshot + takeover, verified with a real 4-worker gunicorn run and a killed scheduler),
+scraper timeouts on every request + jittered retries + Retry-After + conditional GET + per-source circuit breaker + parallel sources with a global deadline + robots.txt for HTML fallback,
+cross-outlet event clustering (one story = one event, corroboration capped at 1.75x, wire copy counts once, representative = best-graded source).
+
+Still open (do next, in this order): signals log + backtest + A/B of chart verdicts (P6); one-headline BUY/SELL threshold and recency decay in `aggregate_board` (P4);
+honest-UA default and dropping dead/paywalled sources after a source-yield audit (P1); structured logging/metrics, Docker non-root image (P7).
 Unverified from the build sandbox (check on first run): NSE/Yahoo endpoint formats - failures show up as `error` in `/api/briefing` coverage.

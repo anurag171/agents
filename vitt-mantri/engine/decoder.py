@@ -7,6 +7,17 @@ from .universe import BEARISH_WORDS, BULLISH_WORDS, SKIP_TITLES
 
 THEMES = load_theme_config()            # keywords/negations/rules; impacts resolve against the live universe
 _RX = {}
+GRADE_A = {"Bloomberg", "Reuters", "Financial Times", "WSJ", "NSE"}
+GRADE_B = {"Yahoo Finance", "Economic Times", "Moneycontrol", "CNBC-TV18", "Business Standard", "MarketWatch", "Investing.com", "Seeking Alpha", "MSN Money"}
+
+
+def grade_of(src):
+    return "A" if src in GRADE_A else "B" if src in GRADE_B else "C"
+
+
+def corroboration(n_sources):
+    """One event reported by N independent origins weighs 1.0x .. 1.75x - never N times."""
+    return 1.0 + 0.25 * min(max(int(n_sources or 1) - 1, 0), 3)
 
 
 def _wb(phrases, min_len=3):
@@ -76,18 +87,8 @@ def decode_item(item):
     blob = f"{title}. {summary}"
     named = _named_companies(blob)
     themes = _theme_hits(blob)
-    GRADE_A = {"Bloomberg", "Reuters", "Financial Times", "WSJ", "NSE"}
-    GRADE_B = {
-        "Yahoo Finance", "Economic Times", "Moneycontrol", "CNBC-TV18",
-        "Business Standard", "MarketWatch", "Investing.com", "Seeking Alpha", "MSN Money",
-    }
     src = item.get("source") or ""
-    if src in GRADE_A:
-        source_grade = "A"
-    elif src in GRADE_B:
-        source_grade = "B"
-    else:
-        source_grade = "C"
+    source_grade = grade_of(src)
 
     signals = []
     seen_pair = set()
@@ -177,6 +178,10 @@ def decode_item(item):
         "published_at": item.get("published_at"),
         "fetched_at": item.get("fetched_at"),
         "source_grade": source_grade,
+        "n_sources": item.get("n_sources", 1),
+        "sources": item.get("sources") or [item["source"]],
+        "also": item.get("also", []),
+        "published_estimated": item.get("published_estimated", False),
         "theme": theme_label,
         "theme_id": tid if themes else "unmapped",
         "meaning": meaning,
@@ -209,7 +214,7 @@ def aggregate_board(decoded):
         for s in news["signals"]:
             row = book[s["ticker"]]
             row["ticker"] = s["ticker"]
-            weight = s["confidence"] * (1.25 if s["hop"] == "direct" else 0.85)
+            weight = s["confidence"] * (1.25 if s["hop"] == "direct" else 0.85) * corroboration(news.get("n_sources", 1))
             if s["action"] == "BUY":
                 row["buy"] += weight
                 row["direct_buy" if s["hop"] == "direct" else "indirect_buy"] += weight
@@ -220,9 +225,10 @@ def aggregate_board(decoded):
                 row["headlines"].append(news["title"])
             if s["why"] not in row["whys"]:
                 row["whys"].append(s["why"])
-            src = news.get("source")
-            if src and src not in row["sources"]:
-                row["sources"].append(src)
+            for src in news.get("sources") or [news.get("source")]:
+                if src and src not in row["sources"]:
+                    row["sources"].append(src)
+            row["events"] = row.get("events", 0) + 1
             region = news.get("region")
             if region and region not in row["regions"]:
                 row["regions"].append(region)
@@ -251,6 +257,7 @@ def aggregate_board(decoded):
                 "why": " | ".join(row["whys"][:3]),
                 "conviction": min(5, round(abs(net) / 2.0, 1)),
                 "sources": row["sources"],
+                "events": row.get("events", 0),
                 "regions": row["regions"],
             }
         )
