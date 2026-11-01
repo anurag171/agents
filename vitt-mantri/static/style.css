@@ -89,6 +89,7 @@ dialog li.sel,dialog li:hover{background:var(--surface-2)}dialog small{color:var
 .sbar{height:6px;background:var(--line);border-radius:3px;margin:4px 0 8px}.sbar i{display:block;height:100%;width:var(--w);background:var(--accent);border-radius:3px}
 .scores{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:8px 0}.scores span{font-size:12px;color:var(--muted)}.scores b{float:right;color:var(--ink)}
 .card details{margin-top:6px;font-size:13px;color:var(--muted)}.card details li{margin:2px 0}.warn{font-size:12px;color:var(--watch);margin:4px 0}
+.bk{display:grid;grid-template-columns:1fr auto;gap:2px 10px;margin-bottom:10px;font-size:13px}.bk .sbar,.bk small{grid-column:1/-1}.bk .sbar{margin:2px 0}
 @media(max-width:860px){.kpis{grid-template-columns:repeat(3,1fr)}.brand small,#palBtn{display:none}}
 @media(max-width:760px){
  main{padding:14px 14px calc(76px + env(safe-area-inset-bottom))}.top{padding-inline:14px}

@@ -314,6 +314,8 @@ Also done: single scheduler across gunicorn workers (flock election + shared ato
 scraper timeouts on every request + jittered retries + Retry-After + conditional GET + per-source circuit breaker + parallel sources with a global deadline + robots.txt for HTML fallback,
 cross-outlet event clustering (one story = one event, corroboration capped at 1.75x, wire copy counts once, representative = best-graded source).
 
-Still open (do next, in this order): signals log + backtest + A/B of chart verdicts (P6); one-headline BUY/SELL threshold and recency decay in `aggregate_board` (P4);
+Recommendation strength as % (`engine/scoring.py`): 6 weighted components with breakdown, coverage-aware, minimum-strength gate (`VM_MIN_SIGNAL_PCT`, default 60) so one weak headline cannot stay a BUY. NOT calibrated: `calibrated=false` until the signals log + backtest exist.
+
+Still open (do next, in this order): signals log + backtest + calibration of the % to observed hit rates + A/B of chart verdicts (P6); recency decay in `aggregate_board` (P4);
 honest-UA default and dropping dead/paywalled sources after a source-yield audit (P1); structured logging/metrics, Docker non-root image (P7).
 Unverified from the build sandbox (check on first run): NSE/Yahoo endpoint formats - failures show up as `error` in `/api/briefing` coverage.

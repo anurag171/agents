@@ -44,20 +44,22 @@ function sync(parent, items, key, make, fill) {
 }
 
 /* ---------- signals ---------- */
-const chip = (a, net) => {
+const chip = (a, net, p) => {
   const c = mk("span", "chip " + a.toLowerCase(), `${GLYPH[a] || ""} ${a}`);
-  if (a !== "WATCH" && net != null) c.append(mk("em", "", (num(net) > 0 ? "+" : "") + num(net).toFixed(1)));
+  if (a !== "WATCH" && p != null) c.append(mk("em", "", Math.round(num(p)) + "%"));
+  else if (a !== "WATCH" && net != null) c.append(mk("em", "", (num(net) > 0 ? "+" : "") + num(net).toFixed(1)));
   return c;
 };
+const strengthOf = (r) => (r.score_pct == null ? -1 : num(r.score_pct));
 const boardRows = () => (DATA.board || [])
   .filter((r) => (V.side === "ALL" || r.action === V.side) && (!V.confirmed || (r.chart && r.chart.verdict === "CONFIRM")))
-  .sort((a, b) => num(b.conviction) - num(a.conviction) || Math.abs(num(b.net)) - Math.abs(num(a.net)));
+  .sort((a, b) => strengthOf(b) - strengthOf(a) || num(b.conviction) - num(a.conviction) || Math.abs(num(b.net)) - Math.abs(num(a.net)));
 
 function fillRow(n, r) {
   const a = r.action || "WATCH", conv = Math.max(0, Math.min(5, Math.round(num(r.conviction))));
   n.className = "row " + a.toLowerCase();
-  const head = mk("div", "rh"); head.append(mk("b", "tk", r.ticker), chip(a, r.net));
-  const meter = mk("div", "meter"); meter.setAttribute("role", "img"); meter.setAttribute("aria-label", `Conviction ${conv} of 5`);
+  const head = mk("div", "rh"); head.append(mk("b", "tk", r.ticker), chip(a, r.net, r.score_pct));
+  const meter = mk("div", "meter"); meter.setAttribute("role", "img"); meter.setAttribute("aria-label", r.score_pct != null ? `Signal strength ${Math.round(num(r.score_pct))} percent, ${r.strength}` : `Conviction ${conv} of 5`);
   for (let i = 0; i < 5; i++) meter.append(mk("i", i < conv ? "on" : ""));
   const left = mk("div", "rl"); left.append(head, meter);
   const hop = num(r.direct_buy) + num(r.direct_sell) >= num(r.indirect_buy) + num(r.indirect_sell) ? "direct" : "indirect";
@@ -73,6 +75,9 @@ function fillRow(n, r) {
   if (r.chart && r.chart.verdict) flags.append(mk("span", "vchip v-" + r.chart.verdict.toLowerCase(), "Chart: " + r.chart.verdict.toLowerCase()));
   if (r.news_action && r.news_action !== a) flags.append(mk("span", "vchip v-note", "News said " + r.news_action));
   if (r.priced_in) flags.append(mk("span", "vchip v-wait", "Priced in"));
+  if (a === "WATCH" && r.lean && r.score_pct != null) flags.append(mk("span", "vchip v-note", `Leaning ${r.lean} ${Math.round(num(r.score_pct))}%`));
+  if (r.gated_by_strength) flags.append(mk("span", "vchip v-wait", "Below strength bar"));
+  if (r.limited_data) flags.append(mk("span", "vchip v-note", "Limited data"));
   const mid = mk("div", "rm"); mid.append(mk("p", "why", r.why || "Aggregated from live headlines."), meta, flags);
   n.replaceChildren(left, mid, mk("span", "chev", "›"));
 }
@@ -83,6 +88,17 @@ function renderSignals() {
 }
 
 /* ---------- drawer ---------- */
+function breakdown(r) {
+  const wrap = mk("div");
+  wrap.append(mk("p", "", r.score_pct == null ? "No news evidence behind this row; it is market-driven only." : `${Math.round(num(r.score_pct))}% · ${r.strength} · data coverage ${num(r.data_coverage_pct)}%` + (r.limited_data ? " (capped: limited data)" : "")));
+  (r.signal_breakdown || []).forEach((b) => {
+    const d = mk("div", "bk"); d.append(mk("span", "", `${b.label} · weight ${b.weight_pct}%`), mk("b", "", b.available ? b.value_pct + "%" : "no data"));
+    const bar = mk("div", "sbar"); bar.style.setProperty("--w", (b.available ? num(b.value_pct) : 0) + "%"); bar.append(mk("i")); d.append(bar, mk("small", "meta", b.note || ""));
+    wrap.append(d);
+  });
+  wrap.append(mk("p", "meta", "Signal strength = how much agreeing evidence stands behind the call. It is not a probability of profit and is not yet calibrated against outcomes."));
+  return wrap;
+}
 const kv = (k, v) => { const d = mk("div", "kv"); d.append(mk("span", "", k), mk("b", "", v)); return d; };
 const section = (title, ...kids) => { const s = mk("div", "sec"); s.append(mk("h4", "", title), ...kids); return s; };
 function openDrawer(ticker) {
@@ -91,7 +107,7 @@ function openDrawer(ticker) {
   lastFocus = document.activeElement;
   $("dTitle").textContent = r.ticker;
   const body = $("dBody"), a = r.action || "WATCH", urls = new Map((DATA.news || []).map((n) => [n.title, n.url]));
-  const top = mk("div", "rh"); top.append(chip(a, r.net), mk("span", "meta", `conviction ${num(r.conviction)}/5`));
+  const top = mk("div", "rh"); top.append(chip(a, r.net, r.score_pct), mk("span", "meta", r.score_pct != null ? r.strength : "No news signal"));
   const why = mk("ul"); (r.whys && r.whys.length ? r.whys : [r.why || "Aggregated from live headlines."]).slice(0, 6).forEach((w) => why.append(mk("li", "", w)));
   const ev = mk("ul");
   (r.headlines || []).slice(0, 8).forEach((h) => { const li = mk("li"), l = mk("a", "", h); l.href = safeUrl(urls.get(h)); l.target = "_blank"; l.rel = "noopener noreferrer"; li.append(l); ev.append(li); });
@@ -104,7 +120,7 @@ function openDrawer(ticker) {
       kv("News said", r.news_action || a));
   }
   const chartBox = mk("div"); chartBox.id = "chartBox"; chartBox.textContent = "Loading chart…";
-  const parts = [top, section("Why", why), section("Evidence", ev.children.length ? ev : mk("p", "meta", "No linked headlines.")), section("Chart & price range", chartBox)];
+  const parts = [top, section("How strong is this signal?", breakdown(r)), section("Why", why), section("Evidence", ev.children.length ? ev : mk("p", "meta", "No linked headlines.")), section("Chart & price range", chartBox)];
   if (ch.verdict) { parts.push(grid); const rs = mk("ul"); (ch.reasons || []).forEach((x) => rs.append(mk("li", "", x))); parts.push(section("Chart reasoning", rs)); }
   if (r.counter_view) parts.push(section("Counter-view", mk("p", "", r.counter_view)));
   parts.push(mk("p", "disclaimer", "Educational impact map — not investment advice."));
@@ -208,7 +224,7 @@ function renderAssets() {
       if (a.available) { px.append(mk("b", "", fmt(a.price)), mk("small", "pct " + (num(a.change_pct) >= 0 ? "up" : "down"), signed(a.change_pct))); }
       row.append(name, sp, px);
       const fl = mk("div", "flags ev");
-      if (a.action === "BUY" || a.action === "SELL") fl.append(chip(a.action, null));
+      if (a.action === "BUY" || a.action === "SELL") fl.append(chip(a.action, null, a.score_pct));
       if (a.news_action) fl.append(mk("span", "vchip v-note", "News said " + a.news_action));
       if (a.chart && a.chart.verdict) fl.append(mk("span", "vchip v-" + a.chart.verdict.toLowerCase(), "Chart: " + a.chart.verdict.toLowerCase()));
       if (a.note) fl.append(mk("span", "", a.note));
@@ -363,8 +379,11 @@ function demoChart(a) {
 function demoData() {
   const sp = (a, b) => Array.from({ length: 40 }, (_, i) => a + ((b - a) * i) / 39 + Math.sin(i / 3) * (b - a) * 0.05);
   const now = new Date().toISOString();
+  const bd = (c) => { const p = Math.min(95, c * 18 + 8); return { score_pct: p, strength: p >= 80 ? "Very strong" : p >= 60 ? "Strong" : p >= 40 ? "Moderate" : "Weak", data_coverage_pct: 100, lean: null, calibrated: false,
+    signal_breakdown: [["News strength", 30, 88, "net news score +3.4"], ["Evidence agrees", 10, 100, "3.4 supporting vs 0.0 opposing"], ["Independent confirmation", 15, 65, "2 event(s) from 3 outlet(s)"], ["Source quality", 10, 100, "best source grade A"], ["Chart check", 25, 82, "confirm: trend up (+0.35)"], ["Market reaction", 10, 80, "+3.6% today - price is moving the same way"]]
+      .map(([label, w, v, note]) => ({ label, weight_pct: w, value_pct: v, available: true, note })) }; };
   const row = (ticker, action, net, conviction, why, x = {}) => ({ ticker, action, net, conviction, why, whys: [why], sources: ["Reuters", "Economic Times"], regions: ["Global"],
-    headlines: ["Brent crude jumps 4% as Hormuz tensions flare", "RBI holds repo rate, keeps stance neutral"], direct_buy: action === "BUY" ? 2 : 0, direct_sell: action === "SELL" ? 2 : 0, indirect_buy: 0, indirect_sell: 0, ...x });
+    headlines: ["Brent crude jumps 4% as Hormuz tensions flare", "RBI holds repo rate, keeps stance neutral"], direct_buy: action === "BUY" ? 2 : 0, direct_sell: action === "SELL" ? 2 : 0, indirect_buy: 0, indirect_sell: 0, ...(x.score_pct === undefined && conviction > 1 ? bd(conviction) : {}), ...x });
   const ch = (verdict, score, rr) => ({ verdict, score, rr, entry_zone: [412.5, 428.0], stop: 401.2, target: 462.0, reasons: ["trend up (+0.35)", "momentum RSI 58 / MACD (+0.25)", "history: 61% hit over 10d in 34 analogs (+0.22)"] });
   const tk = (t) => ({ ticker: t });
   return { count: 42, cycle: 7, updated_at: now, ai_ready: true, interpreter: "rules+ai",
@@ -382,7 +401,7 @@ function demoData() {
         { name: "Zed Tech", status: "upcoming", verdict: "INSUFFICIENT DATA", listing_score: 50, longterm_score: 50, coverage: 0.1, sources: ["news"], price_band: [50, 52], terms: {}, subscription: {}, flags: [], factors: { listing: [], longterm: [] } }],
       coverage: [{ source: "Market: NSE", raw: 497 }, { source: "Economic Times", raw: 18 }, { source: "Moneycontrol", raw: 12 }, { source: "Reuters", raw: 9 }, { source: "Bloomberg", raw: 0 }],
     board: [row("ONGC", "BUY", 3.4, 4, "Higher crude lifts upstream realisations.", { chart: ch("CONFIRM", 0.62, 2.1), market: { price: 268.4, change_pct: 3.6, mkt: "IN", flags: [] } }),
-      row("ZOMATO", "WATCH", 0, 1, "Top gainer: +5.2% — no mapped news explains the move yet.", { origin: "market-mover", market: { price: 255.1, change_pct: 5.2, mkt: "IN", flags: ["volume 2.4x avg"] } }),
+      row("ZOMATO", "WATCH", 0, 1, "Top gainer: +5.2% — no mapped news explains the move yet.", { origin: "market-mover", score_pct: null, strength: "No news signal", market: { price: 255.1, change_pct: 5.2, mkt: "IN", flags: ["volume 2.4x avg"] } }),
       row("INDIGO", "SELL", -2.9, 4, "Jet fuel costs rise with crude; margins squeezed.", { chart: ch("CONTRADICT", -0.31, 1.1), news_action: "SELL" }),
       row("RELIANCE", "WATCH", 1.1, 2, "Refining gains offset by retail softness.", { news_action: "BUY", chart: ch("WAIT", 0.18, 1.2), priced_in: true }),
       row("HDFCBANK", "BUY", 2.2, 3, "Rate pause supports net interest margin outlook.", { chart: ch("NEUTRAL", 0.1, 1.7) }),

@@ -209,6 +209,7 @@ def aggregate_board(decoded):
         "whys": [],
         "sources": [],
         "regions": [],
+        "grade": "C",
     })
     for news in decoded:
         for s in news["signals"]:
@@ -229,6 +230,7 @@ def aggregate_board(decoded):
                 if src and src not in row["sources"]:
                     row["sources"].append(src)
             row["events"] = row.get("events", 0) + 1
+            row["grade"] = min(row["grade"], news.get("source_grade") or "C")
             region = news.get("region")
             if region and region not in row["regions"]:
                 row["regions"].append(region)
@@ -258,6 +260,7 @@ def aggregate_board(decoded):
                 "conviction": min(5, round(abs(net) / 2.0, 1)),
                 "sources": row["sources"],
                 "events": row.get("events", 0),
+                "best_grade": row["grade"],
                 "regions": row["regions"],
             }
         )

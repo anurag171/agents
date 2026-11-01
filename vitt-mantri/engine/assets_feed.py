@@ -9,6 +9,7 @@ from .bars import fetch_bars
 from .chartgate import evaluate
 from .impacts import load_theme_config
 from .instruments import CFG
+from .scoring import min_pct, score_asset
 
 DIRECT_W, INDIRECT_W, CAP_ITEMS, ENTER = 1.0, 0.6, 3, 1.5
 
@@ -70,6 +71,10 @@ def build_assets(decoded, fetch=fetch_bars, cfg=None, items=None):
                 if new != action:
                     row["news_action"], row["action"] = action, new
         rows.append(row)
+    for r in rows:
+        score_asset(r)
+        if r["action"] in ("BUY", "SELL") and r.get("score_pct") is not None and r["score_pct"] < min_pct():
+            r.setdefault("news_action", r["action"]); r["action"], r["gated_by_strength"] = "WATCH", True
     order = {"BUY": 0, "SELL": 0, "WATCH": 1}
     rows.sort(key=lambda r: (order[r["action"]], -abs(r["news_score"]), r["label"]))
     return rows, [{"source": "Assets: Yahoo", "raw": ok}]

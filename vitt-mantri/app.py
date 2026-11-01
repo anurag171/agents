@@ -16,6 +16,7 @@ from engine.instruments import get_universe
 from engine.assets_feed import build_assets
 from engine.chartgate import chart_for, enrich_board
 from engine.ipo_feed import build_ipos
+from engine.scoring import score_board
 from engine.movers import derive_lists, fetch_quotes, merge_into_board
 from engine.scraper import scrape_all
 
@@ -104,6 +105,7 @@ def _build():
     lists = derive_lists(quotes)
     board = merge_into_board(board, quotes, lists)           # market reaction on news rows + unexplained big movers
     board = enrich_board(board, require=os.getenv("VM_REQUIRE_CHART_CONFIRM") == "1")   # chart verdict + entry range
+    board = score_board(board)                                                           # strength % + breakdown + minimum-strength gate
     assets, assets_cov = build_assets(decoded)                                           # commodities/FX/rates/indices/crypto
     ipos, ipo_cov = build_ipos(raw)                                                      # IPO insights
     coverage = list(coverage) + market_cov + assets_cov + ipo_cov
