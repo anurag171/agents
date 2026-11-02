@@ -1,7 +1,30 @@
 import re
 from collections import defaultdict
 
-from .universe import BEARISH_WORDS, BULLISH_WORDS, COMPANIES, SKIP_TITLES, THEMES
+from .impacts import BUCKETS, SECTOR_RULE_WEIGHT, load_theme_config, resolve
+from .instruments import get_universe
+from .universe import BEARISH_WORDS, BULLISH_WORDS, SKIP_TITLES
+
+THEMES = load_theme_config()            # keywords/negations/rules; impacts resolve against the live universe
+_RX = {}
+GRADE_A = {"Bloomberg", "Reuters", "Financial Times", "WSJ", "NSE"}
+GRADE_B = {"Yahoo Finance", "Economic Times", "Moneycontrol", "CNBC-TV18", "Business Standard", "MarketWatch", "Investing.com", "Seeking Alpha", "MSN Money"}
+
+
+def grade_of(src):
+    return "A" if src in GRADE_A else "B" if src in GRADE_B else "C"
+
+
+def corroboration(n_sources):
+    """One event reported by N independent origins weighs 1.0x .. 1.75x - never N times."""
+    return 1.0 + 0.25 * min(max(int(n_sources or 1) - 1, 0), 3)
+
+
+def _wb(phrases, min_len=3):
+    """Word-boundary alternation. Fragments shorter than min_len (e.g. 'spr') are ignored: they matched
+    'spread'/'spring' and flipped oil themes."""
+    ph = sorted({p.strip().lower() for p in phrases if p and len(p.strip()) >= min_len}, key=len, reverse=True)
+    return re.compile(r"(?<![a-z0-9])(?:%s)(?![a-z0-9])" % "|".join(map(re.escape, ph))) if ph else None
 
 
 def _norm(text):
@@ -14,25 +37,21 @@ def _skip(title):
 
 
 def _named_companies(text):
-    blob = _norm(text)
-    hits = []
-    seen = set()
-    for key, meta in sorted(COMPANIES.items(), key=lambda kv: len(kv[0]), reverse=True):
-        if re.search(rf"(?<![a-z0-9]){re.escape(key)}(?![a-z0-9])", blob):
-            if meta["ticker"] in seen:
-                continue
-            seen.add(meta["ticker"])
-            hits.append(meta)
-    return hits
+    """Dynamic: any instrument in the live universe whose name/alias/symbol appears in the text."""
+    return [{"ticker": i.symbol, "name": i.name, "sector": (i.tags[0] if i.tags else i.industry or i.asset_class),
+             "asset_class": i.asset_class} for i in get_universe().match(text or "")]
 
 
 def _theme_hits(text):
     blob = _norm(text)
     scored = []
     for tid, theme in THEMES.items():
-        if any(n in blob for n in theme.get("negations", []) if n):
+        if tid not in _RX:
+            _RX[tid] = (_wb(theme["keywords"]), _wb(theme.get("negations", []), min_len=4))
+        kw, neg = _RX[tid]
+        if neg and neg.search(blob):
             continue
-        hits = [k for k in theme["keywords"] if k in blob]
+        hits = sorted({m.group(0) for m in kw.finditer(blob)}) if kw else []
         if hits:
             scored.append((len(hits), tid, hits))
     scored.sort(reverse=True)
@@ -68,23 +87,13 @@ def decode_item(item):
     blob = f"{title}. {summary}"
     named = _named_companies(blob)
     themes = _theme_hits(blob)
-    GRADE_A = {"Bloomberg", "Reuters", "Financial Times", "WSJ", "NSE"}
-    GRADE_B = {
-        "Yahoo Finance", "Economic Times", "Moneycontrol", "CNBC-TV18",
-        "Business Standard", "MarketWatch", "Investing.com", "Seeking Alpha", "MSN Money",
-    }
     src = item.get("source") or ""
-    if src in GRADE_A:
-        source_grade = "A"
-    elif src in GRADE_B:
-        source_grade = "B"
-    else:
-        source_grade = "C"
+    source_grade = grade_of(src)
 
     signals = []
     seen_pair = set()
 
-    def add(ticker, name, hop, action, why, theme_id, theme_score):
+    def add(ticker, name, hop, action, why, theme_id, theme_score, origin="curated"):
         action = _sentiment_nudge(blob, action)
         key = (ticker, hop, action)
         if key in seen_pair:
@@ -99,7 +108,8 @@ def decode_item(item):
                 "why": why,
                 "theme": THEMES.get(theme_id, {}).get("label", theme_id),
                 "theme_id": theme_id,
-                "confidence": _conf(theme_score, bool(named), source_grade),
+                "confidence": round(_conf(theme_score, bool(named), source_grade) * (SECTOR_RULE_WEIGHT if origin == "sector-rule" else 1.0), 2),
+                "origin": origin,
             }
         )
 
@@ -107,14 +117,12 @@ def decode_item(item):
         _, tid, kws = themes[0]
         theme = THEMES[tid]
         score = len(kws)
-        for ticker, why in theme["direct_buy"]:
-            add(ticker, ticker, "direct", "BUY", why, tid, score)
-        for ticker, why in theme["direct_sell"]:
-            add(ticker, ticker, "direct", "SELL", why, tid, score)
-        for ticker, why in theme["indirect_buy"]:
-            add(ticker, ticker, "indirect", "BUY", why, tid, score)
-        for ticker, why in theme["indirect_sell"]:
-            add(ticker, ticker, "indirect", "SELL", why, tid, score)
+        universe = get_universe()
+        resolved = resolve(theme, universe)
+        for bucket in BUCKETS:
+            hop, act = bucket.split("_")
+            for ticker, why, origin in resolved[bucket]:
+                add(ticker, universe.by_symbol[ticker].name, hop, act.upper(), why, tid, score, origin)
         meaning = theme["meaning"]
         theme_label = theme["label"]
     else:
@@ -130,6 +138,8 @@ def decode_item(item):
         if already:
             continue
         blob_l = _norm(blob)
+        if meta.get("asset_class", "equity") != "equity":
+            continue                                    # asset ETFs/FX/crypto only enter via theme rules
         if any(w in blob_l for w in BEARISH_WORDS):
             add(meta["ticker"], meta["name"], "direct", "SELL", "Issuer named in a negative print.", tid, 1)
         elif any(w in blob_l for w in BULLISH_WORDS):
@@ -168,6 +178,10 @@ def decode_item(item):
         "published_at": item.get("published_at"),
         "fetched_at": item.get("fetched_at"),
         "source_grade": source_grade,
+        "n_sources": item.get("n_sources", 1),
+        "sources": item.get("sources") or [item["source"]],
+        "also": item.get("also", []),
+        "published_estimated": item.get("published_estimated", False),
         "theme": theme_label,
         "theme_id": tid if themes else "unmapped",
         "meaning": meaning,
@@ -195,12 +209,13 @@ def aggregate_board(decoded):
         "whys": [],
         "sources": [],
         "regions": [],
+        "grade": "C",
     })
     for news in decoded:
         for s in news["signals"]:
             row = book[s["ticker"]]
             row["ticker"] = s["ticker"]
-            weight = s["confidence"] * (1.25 if s["hop"] == "direct" else 0.85)
+            weight = s["confidence"] * (1.25 if s["hop"] == "direct" else 0.85) * corroboration(news.get("n_sources", 1))
             if s["action"] == "BUY":
                 row["buy"] += weight
                 row["direct_buy" if s["hop"] == "direct" else "indirect_buy"] += weight
@@ -211,9 +226,11 @@ def aggregate_board(decoded):
                 row["headlines"].append(news["title"])
             if s["why"] not in row["whys"]:
                 row["whys"].append(s["why"])
-            src = news.get("source")
-            if src and src not in row["sources"]:
-                row["sources"].append(src)
+            for src in news.get("sources") or [news.get("source")]:
+                if src and src not in row["sources"]:
+                    row["sources"].append(src)
+            row["events"] = row.get("events", 0) + 1
+            row["grade"] = min(row["grade"], news.get("source_grade") or "C")
             region = news.get("region")
             if region and region not in row["regions"]:
                 row["regions"].append(region)
@@ -242,6 +259,8 @@ def aggregate_board(decoded):
                 "why": " | ".join(row["whys"][:3]),
                 "conviction": min(5, round(abs(net) / 2.0, 1)),
                 "sources": row["sources"],
+                "events": row.get("events", 0),
+                "best_grade": row["grade"],
                 "regions": row["regions"],
             }
         )

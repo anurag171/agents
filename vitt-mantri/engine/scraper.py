@@ -1,6 +1,12 @@
 import hashlib
+import os
+import random
 import re
+import threading
 import time
+import urllib.robotparser
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutTimeout, as_completed
+from urllib.parse import urlparse
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from html import unescape
@@ -8,6 +14,8 @@ from html import unescape
 import feedparser
 import requests
 from bs4 import BeautifulSoup
+
+from .resilience import Breaker
 
 HEADERS = {
     "User-Agent": (
@@ -17,6 +25,15 @@ HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-IN,en-US,en;q=0.9",
 }
+
+HEADERS["User-Agent"] = os.getenv("VM_USER_AGENT", HEADERS["User-Agent"])    # set an honest UA (with contact) where sources allow it
+TIMEOUT = (3.05, 10)                                                          # (connect, read) seconds, on EVERY request
+RETRIES, RETRY_STATUS = 2, {429, 500, 502, 503, 504}
+MAX_WORKERS = int(os.getenv("VM_SCRAPE_WORKERS", "8"))
+DEADLINE_S = float(os.getenv("VM_SCRAPE_DEADLINE_S", "45"))
+RESPECT_ROBOTS = os.getenv("VM_RESPECT_ROBOTS", "1") != "0"
+BREAKER = Breaker(threshold=3)
+_sleep = time.sleep
 
 SOURCES = [
     {
@@ -284,6 +301,8 @@ def _parse_time(value):
         "%Y-%m-%dT%H:%M:%S%z",
         "%Y-%m-%dT%H:%M:%SZ",
         "%Y-%m-%d %H:%M:%S",
+        "%d-%b-%Y %H:%M:%S",
+        "%d-%b-%Y",
         "%d %b %Y, %I:%M %p IST",
         "%d %b, %Y, %I:%M %p IST",
         "%b %d, %Y, %I:%M %p IST",
@@ -300,6 +319,7 @@ def _parse_time(value):
 
 def _item(source, region, title, url, summary="", published=None):
     return {
+        "published_estimated": published is None,
         "id": _uid(source, title, url),
         "source": source,
         "region": region,
@@ -311,9 +331,70 @@ def _item(source, region, title, url, summary="", published=None):
     }
 
 
-def _from_feed(url, source, region):
+def _get(session, url, *, headers=None, params=None, timeout=TIMEOUT, retries=RETRIES, sleep=None):
+    """GET with timeout, jittered exponential backoff, Retry-After support. Returns the last response (even a bad
+    status, after retries) or raises the last network error."""
+    sleep, last_exc = sleep or _sleep, None
+    for attempt in range(retries + 1):
+        delay = 0.0
+        try:
+            r = session.get(url, headers=headers, params=params, timeout=timeout)
+        except requests.RequestException as exc:
+            last_exc = exc
+        else:
+            if r.status_code not in RETRY_STATUS or attempt == retries:
+                return r
+            ra = (getattr(r, "headers", None) or {}).get("Retry-After", "")
+            delay = float(ra) if str(ra).isdigit() else 0.0
+            last_exc = None
+        if attempt < retries:
+            sleep(min(10.0, max(delay, 0.5 * 2 ** attempt)) + random.random() * 0.3)
+    raise last_exc or requests.RequestException(f"{url}: retries exhausted")
+
+
+_FEED_CACHE, _CACHE_LOCK = {}, threading.Lock()      # url -> {"etag","lm","items"}  (conditional GET)
+_ROBOTS, _ROBOTS_TTL = {}, 6 * 3600
+
+
+def _robots_ok(session, url):
+    """RFC 9309: 200 -> obey rules; 4xx -> everything allowed; 5xx/unreachable -> treat as disallowed."""
+    if not RESPECT_ROBOTS:
+        return True
+    host = "{0.scheme}://{0.netloc}".format(urlparse(url))
+    with _CACHE_LOCK:
+        hit = _ROBOTS.get(host)
+    if not hit or time.time() - hit[0] > _ROBOTS_TTL:
+        rp = urllib.robotparser.RobotFileParser()
+        try:
+            r = _get(session, host + "/robots.txt", timeout=(3.05, 5), retries=0)
+            if r.status_code == 200:
+                rp.parse(r.text.splitlines())
+            elif 400 <= r.status_code < 500:
+                rp.parse([])
+            else:
+                rp.parse(["User-agent: *", "Disallow: /"])
+        except requests.RequestException:
+            rp.parse(["User-agent: *", "Disallow: /"])
+        hit = (time.time(), rp)
+        with _CACHE_LOCK:
+            _ROBOTS[host] = hit
+    return hit[1].can_fetch("VittaMantri", url)
+
+
+def _from_feed(url, source, region, session=None):
+    session = session or _session()
+    with _CACHE_LOCK:
+        cached = _FEED_CACHE.get(url)
+    cond = {}
+    if cached:
+        if cached["etag"]: cond["If-None-Match"] = cached["etag"]
+        if cached["lm"]: cond["If-Modified-Since"] = cached["lm"]
+    r = _get(session, url, headers=cond or None)
+    if r.status_code == 304 and cached:
+        return list(cached["items"])
+    r.raise_for_status()
     items = []
-    parsed = feedparser.parse(url, request_headers=HEADERS)
+    parsed = feedparser.parse(r.content)                 # parse bytes: no hidden network call, so no hang
     for e in parsed.entries[:40]:
         title = _clean(e.get("title"))
         link = (e.get("link") or "").strip()
@@ -329,6 +410,8 @@ def _from_feed(url, source, region):
         if not title or not link:
             continue
         items.append(_item(source, region, title, link, summary, published))
+    with _CACHE_LOCK:
+        _FEED_CACHE[url] = {"etag": r.headers.get("ETag"), "lm": r.headers.get("Last-Modified"), "items": items}
     return items
 
 
@@ -337,12 +420,14 @@ def _html_links(session, spec):
     bootstrap = spec.get("bootstrap")
     if bootstrap:
         try:
-            session.get(bootstrap, timeout=12)
+            _get(session, bootstrap, retries=0)
         except requests.RequestException:
             pass
     for page in spec.get("pages") or []:
         try:
-            r = session.get(page, timeout=12)
+            if not _robots_ok(session, page):
+                continue
+            r = _get(session, page)
             if r.status_code != 200:
                 continue
         except requests.RequestException:
@@ -366,16 +451,14 @@ def _html_links(session, spec):
     return items
 
 
+NSE_PAGE = "https://www.nseindia.com/companies-listing/corporate-filings-announcements"
+
+
 def _nse_api(session):
     items = []
     try:
-        session.get("https://www.nseindia.com", timeout=12)
-        r = session.get(
-            "https://www.nseindia.com/api/corporate-announcements",
-            params={"index": "equities"},
-            timeout=12,
-            headers={"Referer": "https://www.nseindia.com/companies-listing/corporate-filings-announcements"},
-        )
+        _get(session, "https://www.nseindia.com", retries=0)
+        r = _get(session, "https://www.nseindia.com/api/corporate-announcements", params={"index": "equities"}, headers={"Referer": NSE_PAGE})
         if r.status_code != 200:
             return items
         payload = r.json()
@@ -387,12 +470,12 @@ def _nse_api(session):
             company = _clean(row.get("symbol") or row.get("sm_name") or "")
             if company and title:
                 title = f"{company}: {title}"
-            url = row.get("attchmntFile") or row.get("an_dt") or "https://www.nseindia.com/companies-listing/corporate-filings-announcements"
+            url = row.get("attchmntFile") or NSE_PAGE                 # (was: an_dt, a DATE, used as the link)
             if isinstance(url, str) and url.startswith("/"):
                 url = "https://www.nseindia.com" + url
             if not title:
                 continue
-            items.append(_item("NSE", "India", title, url or "https://www.nseindia.com"))
+            items.append(_item("NSE", "India", title, url, "", _parse_time(row.get("an_dt") or row.get("sort_date"))))
     except (requests.RequestException, ValueError, TypeError):
         return items
     return items
@@ -406,49 +489,68 @@ GOOGLE_NEWS = {
 PER_SOURCE_CAP = 16
 
 
-def scrape_all():
-    session = _session()
-    bag = []
-    errors = []
-    coverage = []
-
-    for spec in SOURCES:
-        got = 0
-        for url in spec.get("feeds") or []:
-            try:
-                chunk = _from_feed(url, spec["name"], spec["region"])
-                bag.extend(chunk)
-                got += len(chunk)
-            except Exception as exc:
-                errors.append(f"{spec['name']} feed {url}: {exc}")
+def _scrape_source(spec, make_session=_session):
+    """All feeds + HTML fallback (+ NSE API / Google News) for ONE source. Returns (items, errors)."""
+    name, session, items, errors = spec["name"], make_session(), [], []
+    for url in spec.get("feeds") or []:
         try:
-            chunk = _html_links(session, spec)
-            bag.extend(chunk)
-            got += len(chunk)
+            items += _from_feed(url, name, spec["region"], session)
         except Exception as exc:
-            errors.append(f"{spec['name']} html: {exc}")
-        if spec["name"] == "NSE":
-            try:
-                chunk = _nse_api(session)
-                bag.extend(chunk)
-                got += len(chunk)
-            except Exception as exc:
-                errors.append(f"NSE api: {exc}")
-        if got == 0 and spec["name"] in GOOGLE_NEWS:
-            try:
-                chunk = _from_feed(GOOGLE_NEWS[spec["name"]], spec["name"], spec["region"])
-                bag.extend(chunk)
-                got += len(chunk)
-            except Exception as exc:
-                errors.append(f"{spec['name']} gnews: {exc}")
-        coverage.append({"source": spec["name"], "region": spec["region"], "raw": got})
+            errors.append(f"{name} feed {url}: {type(exc).__name__}: {exc}")
+    try:
+        items += _html_links(session, spec)
+    except Exception as exc:
+        errors.append(f"{name} html: {type(exc).__name__}: {exc}")
+    if name == "NSE":
+        try:
+            items += _nse_api(session)
+        except Exception as exc:
+            errors.append(f"NSE api: {type(exc).__name__}: {exc}")
+    if not items and name in GOOGLE_NEWS:
+        try:
+            items += _from_feed(GOOGLE_NEWS[name], name, spec["region"], session)
+        except Exception as exc:
+            errors.append(f"{name} gnews: {type(exc).__name__}: {exc}")
+    return items, errors
 
-    seen = set()
-    unique = []
-    per = {}
+
+def scrape_all(sources=None, make_session=_session, breaker=None, deadline_s=None):
+    """Sources run in parallel, each with timeouts/retries, behind a per-source circuit breaker and a global deadline.
+    A slow or dead source can no longer stall the cycle; cross-outlet duplicates are handled later by engine.cluster."""
+    sources, breaker, deadline_s = sources or SOURCES, breaker or BREAKER, deadline_s or DEADLINE_S
+    bag, errors, cov, skipped = [], [], {}, []
+    active = []
+    for spec in sources:
+        if breaker.allow(spec["name"]):
+            active.append(spec)
+        else:
+            cov[spec["name"]] = {"source": spec["name"], "region": spec["region"], "raw": 0, "state": "open", "retry_in_s": breaker.retry_in(spec["name"])}
+    pool = ThreadPoolExecutor(max_workers=max(1, min(MAX_WORKERS, len(active))))
+    futs = {pool.submit(_scrape_source, spec, make_session): spec for spec in active}
+    done = set()
+    try:
+        for f in as_completed(futs, timeout=deadline_s):
+            spec = futs[f]; done.add(f)
+            try:
+                items, errs = f.result()
+            except Exception as exc:
+                items, errs = [], [f"{spec['name']}: {type(exc).__name__}: {exc}"]
+            bag += items; errors += errs
+            (breaker.success if items else breaker.failure)(spec["name"])
+            cov[spec["name"]] = {"source": spec["name"], "region": spec["region"], "raw": len(items), "state": "ok" if items else "empty"}
+    except FutTimeout:
+        pass
+    for f, spec in futs.items():
+        if f not in done:
+            f.cancel(); breaker.failure(spec["name"])
+            errors.append(f"{spec['name']}: exceeded {deadline_s:g}s deadline")
+            cov[spec["name"]] = {"source": spec["name"], "region": spec["region"], "raw": 0, "state": "deadline"}
+    pool.shutdown(wait=False, cancel_futures=True)       # never block the cycle on a straggler
+
+    seen, unique, per = set(), [], {}
     bag.sort(key=lambda x: x.get("published_at") or x["fetched_at"], reverse=True)
     for item in bag:
-        key = (item["source"], item["title"].lower())
+        key = (item["source"], item["title"].lower())    # same outlet, same title. Cross-outlet is engine.cluster's job
         if key in seen:
             continue
         src = item["source"]
@@ -457,5 +559,4 @@ def scrape_all():
         seen.add(key)
         per[src] = per.get(src, 0) + 1
         unique.append(item)
-
-    return unique[:160], errors, coverage
+    return unique[:160], errors, [cov[s["name"]] for s in sources if s["name"] in cov]

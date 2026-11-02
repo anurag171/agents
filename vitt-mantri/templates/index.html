@@ -1,97 +1,101 @@
 <!DOCTYPE html>
 <html lang="en" data-theme="dark">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Vitta-Mantri — News Impact Device</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=IBM+Plex+Mono:wght@400;500;600&family=Syne:wght@700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<title>Vitta-Mantri · News impact</title>
+<link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <div class="orb orb-a"></div>
-  <div class="orb orb-b"></div>
-  <header class="mast">
-    <div class="brand">
-      <div class="seal">VM</div>
-      <div>
-        <p class="kicker">वित्त मंत्री · live decoder</p>
-        <h1>Vitta-Mantri</h1>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top" id="top">
+  <div class="brand"><span class="seal">VM</span><div><b>Vitta-Mantri</b><small>News impact decoder</small></div></div>
+  <nav class="tabs" id="tabs" role="tablist" aria-label="Views">
+    <button role="tab" data-tab="signals" aria-selected="true">Signals</button>
+    <button role="tab" data-tab="market" aria-selected="false">Market</button>
+    <button role="tab" data-tab="assets" aria-selected="false">Assets</button>
+    <button role="tab" data-tab="ipos" aria-selected="false">IPOs</button>
+    <button role="tab" data-tab="track" aria-selected="false">Track record</button>
+    <button role="tab" data-tab="tape" aria-selected="false">Tape</button>
+    <button role="tab" data-tab="sources" aria-selected="false">Sources</button>
+  </nav>
+  <div class="tools">
+    <span class="live" id="live"><i></i><span id="liveText">connecting</span></span>
+    <button id="palBtn" class="ghost" aria-label="Search (press /)">Search <kbd>/</kbd></button>
+    <button id="theme" class="ghost" aria-label="Toggle theme">◐</button>
+    <button id="refresh" class="primary">Refresh</button>
+  </div>
+</header>
+<div id="stale" class="banner" role="alert" hidden></div>
+<main id="main">
+  <section class="kpis" id="kpis" aria-live="polite"></section>
+  <p class="disclaimer">Educational impact map from public headlines — not investment advice. Signals can be wrong, late or already priced in.</p>
+
+  <section id="v-signals" class="view">
+    <div class="bar">
+      <div class="seg" id="side" role="group" aria-label="Action filter">
+        <button data-s="ALL" class="on">All</button><button data-s="BUY">Buy</button><button data-s="SELL">Sell</button><button data-s="WATCH">Watch</button>
       </div>
+      <label class="chk"><input type="checkbox" id="confirmed"> Chart-confirmed only</label>
     </div>
-    <div class="status">
-      <div class="pulse" id="pulse"></div>
-      <div>
-        <div class="clock" id="clock">--</div>
-        <div class="meta" id="meta">scraping India + global tape</div>
+    <div id="skel" class="list"><div class="row skel"></div><div class="row skel"></div><div class="row skel"></div></div>
+    <div id="list" class="list"></div>
+    <p id="emptyS" class="empty" hidden>No names match this view yet. Signals appear after the next scrape cycle.</p>
+  </section>
+
+  <section id="v-market" class="view" hidden>
+    <p class="meta" id="mktNote"></p>
+    <div class="cols" id="mktCols"></div>
+  </section>
+
+  <section id="v-assets" class="view" hidden>
+    <p class="meta">Commodities, currencies, rates, indices and crypto: live price, 20-day trend, news pressure from today's themes, and a chart check.</p>
+    <div class="cols" id="assetCols"></div>
+  </section>
+
+  <section id="v-ipos" class="view" hidden>
+    <p class="meta" id="ipoNote"></p>
+    <div class="feed" id="ipoList"></div>
+    <p id="emptyI" class="empty" hidden>No IPO activity found. Sources: NSE issue lists, IPO headlines, and files in VM_IPO_DIR.</p>
+  </section>
+
+  <section id="v-track" class="view" hidden>
+    <div class="bar">
+      <div class="seg" id="hz" role="group" aria-label="Horizon"><button data-h="1">1 day</button><button data-h="5" class="on">5 days</button><button data-h="20">20 days</button></div>
+      <span class="meta" id="trackNote"></span>
+    </div>
+    <div id="trackBody"></div>
+  </section>
+
+  <section id="v-tape" class="view" hidden>
+    <div class="bar">
+      <input id="q" type="search" placeholder="Filter headlines, themes, tickers" aria-label="Filter headlines">
+      <div class="seg" id="region" role="group" aria-label="Region">
+        <button data-r="all" class="on">All</button><button data-r="india">India</button><button data-r="global">Global</button>
       </div>
-      <button id="theme" type="button" aria-label="Toggle theme">Dark</button>
-      <button id="refresh" type="button">Force scrape</button>
-    </div>
-  </header>
-
-  <section class="disclaimer">
-    Educational impact map from public headlines. Not personalized investment advice. Positions can be wrong, late, or already priced. Bloomberg / Reuters / FT / WSJ often paywall — RSS headlines still map.
-  </section>
-
-  <section class="stats" id="stats"></section>
-
-  <section class="controls">
-    <input id="q" type="search" placeholder="Filter ticker or headline — RELIANCE, NVDA, rupee, oil..." />
-    <p class="filter-hint" id="filterHint">Showing all tape</p>
-    <div class="pills" id="pills">
-      <button data-f="all" class="on">All tape</button>
-      <button data-f="india">India</button>
-      <button data-f="global">Global</button>
-      <button data-f="buy">Buy board</button>
-      <button data-f="sell">Sell board</button>
-      <button data-f="direct">Direct only</button>
-      <button data-f="et">Economic Times</button>
-      <button data-f="mc">Moneycontrol</button>
-      <button data-f="nse">NSE</button>
-      <button data-f="msn">MSN Money</button>
-      <button data-f="cnbc">CNBC-TV18</button>
-      <button data-f="bs">Business Standard</button>
-      <button data-f="yf">Yahoo Finance</button>
-      <button data-f="mw">MarketWatch</button>
-      <button data-f="inv">Investing.com</button>
-      <button data-f="sa">Seeking Alpha</button>
-      <button data-f="bbg">Bloomberg</button>
-      <button data-f="reu">Reuters</button>
-      <button data-f="ft">FT</button>
-      <button data-f="wsj">WSJ</button>
-    </div>
-  </section>
-
-  <section class="boards">
-    <article class="col buy">
-      <h2><span>BUY</span> financial impact supports long</h2>
-      <ol id="buys"></ol>
-    </article>
-    <article class="col sell">
-      <h2><span>SELL</span> financial impact supports short / avoid</h2>
-      <ol id="sells"></ol>
-    </article>
-    <article class="col watch">
-      <h2><span>WATCH</span> mixed or not yet sized</h2>
-      <ol id="watch"></ol>
-    </article>
-  </section>
-
-  <section class="feed-wrap">
-    <div class="feed-head">
-      <h2>Headline meaning stream</h2>
-      <p>AI reads the headline first, writes the financial meaning, then the BUY/SELL map. Rules engine is the fallback if USER_LLM_API_KEY is unset.</p>
+      <details class="menu"><summary>Sources <span id="srcCount">all</span></summary><div class="pop" id="srcPop"></div></details>
+      <label class="chk"><input type="checkbox" id="direct"> Direct only</label>
     </div>
     <div id="feed" class="feed"></div>
+    <p id="emptyT" class="empty" hidden>No headlines match these filters.</p>
   </section>
 
-  <footer>
-    India: ET, Moneycontrol, CNBC-TV18, Business Standard, NSE, MSN Money.
-    Global: Yahoo Finance, MarketWatch, Investing.com, Seeking Alpha, Bloomberg, Reuters, FT, WSJ.
-    Direct = issuer cash-flow. Indirect = suppliers, customers, FX, rates, competitors, flows.
-  </footer>
-  <script src="{{ url_for('static', filename='app.js') }}"></script>
+  <section id="v-sources" class="view" hidden>
+    <table class="tbl"><thead><tr><th>Source</th><th>Items</th><th>Status</th></tr></thead><tbody id="srcBody"></tbody></table>
+  </section>
+</main>
+
+<aside id="drawer" class="drawer" role="dialog" aria-modal="true" aria-labelledby="dTitle" hidden>
+  <div class="scrim" id="scrim"></div>
+  <div class="sheet" id="sheet" tabindex="-1">
+    <div class="sh"><h2 id="dTitle"></h2><button id="dClose" class="ghost" aria-label="Close">✕</button></div>
+    <div id="dBody"></div>
+  </div>
+</aside>
+<dialog id="pal"><input id="palQ" placeholder="Jump to a ticker or headline…" aria-label="Search"><ul id="palList"></ul></dialog>
+<div id="toast" class="toast" role="status" hidden></div>
+<script src="/static/chart.js"></script>
+<script src="/static/app.js"></script>
 </body>
 </html>
