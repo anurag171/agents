@@ -21,6 +21,7 @@ from __future__ import annotations
 import math
 import os
 
+SCORING_VERSION = "s1"          # bump when weights/formula change: the log never mixes versions
 W = {"news": 0.30, "consistency": 0.10, "corroboration": 0.15, "source": 0.10, "chart": 0.25, "market": 0.10}
 LABEL = {"news": "News strength", "consistency": "Evidence agrees", "corroboration": "Independent confirmation", "source": "Source quality",
          "chart": "Chart check", "market": "Market reaction"}
@@ -69,7 +70,7 @@ def _finish(row, comps, notes, lean):
     limited = wsum < LIMITED_COVERAGE
     pct = 50 + (pct - 50) * wsum
     pct = int(round(max(0, min(100, pct))))
-    row.update(score_pct=pct, strength=label(min(pct, 79) if limited else pct), lean=lean, data_coverage_pct=int(round(wsum * 100)), limited_data=limited, calibrated=False,
+    row.update(score_pct=pct, strength=label(min(pct, 79) if limited else pct), lean=lean, data_coverage_pct=int(round(wsum * 100)), limited_data=limited, calibrated=False, scoring_version=SCORING_VERSION,
                conviction=max(1, min(5, math.ceil(pct / 20))),
                signal_breakdown=[{"key": k, "label": LABEL[k], "weight_pct": int(W[k] * 100), "available": comps.get(k) is not None,
                                   "value_pct": None if comps.get(k) is None else int(round(comps[k] * 100)), "note": notes.get(k, "")} for k in W])

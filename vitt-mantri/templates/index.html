@@ -16,6 +16,7 @@
     <button role="tab" data-tab="market" aria-selected="false">Market</button>
     <button role="tab" data-tab="assets" aria-selected="false">Assets</button>
     <button role="tab" data-tab="ipos" aria-selected="false">IPOs</button>
+    <button role="tab" data-tab="track" aria-selected="false">Track record</button>
     <button role="tab" data-tab="tape" aria-selected="false">Tape</button>
     <button role="tab" data-tab="sources" aria-selected="false">Sources</button>
   </nav>
@@ -57,6 +58,14 @@
     <p class="meta" id="ipoNote"></p>
     <div class="feed" id="ipoList"></div>
     <p id="emptyI" class="empty" hidden>No IPO activity found. Sources: NSE issue lists, IPO headlines, and files in VM_IPO_DIR.</p>
+  </section>
+
+  <section id="v-track" class="view" hidden>
+    <div class="bar">
+      <div class="seg" id="hz" role="group" aria-label="Horizon"><button data-h="1">1 day</button><button data-h="5" class="on">5 days</button><button data-h="20">20 days</button></div>
+      <span class="meta" id="trackNote"></span>
+    </div>
+    <div id="trackBody"></div>
   </section>
 
   <section id="v-tape" class="view" hidden>

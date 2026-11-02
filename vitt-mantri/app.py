@@ -17,6 +17,8 @@ from engine.assets_feed import build_assets
 from engine.chartgate import chart_for, enrich_board
 from engine.ipo_feed import build_ipos
 from engine.scoring import score_board
+from engine.signal_log import HORIZONS, attach_history, evaluate_outcomes, export_csv, performance, record
+from engine.store import Store
 from engine.movers import derive_lists, fetch_quotes, merge_into_board
 from engine.scraper import scrape_all
 
@@ -106,7 +108,12 @@ def _build():
     board = merge_into_board(board, quotes, lists)           # market reaction on news rows + unexplained big movers
     board = enrich_board(board, require=os.getenv("VM_REQUIRE_CHART_CONFIRM") == "1")   # chart verdict + entry range
     board = score_board(board)                                                           # strength % + breakdown + minimum-strength gate
-    assets, assets_cov = build_assets(decoded)                                           # commodities/FX/rates/indices/crypto
+    assets, assets_cov = build_assets(decoded)
+    try:                                                                                 # log every call; attach the observed track record to each %
+        st = Store(); record(st, board, assets, engine_version=os.getenv("VM_VERSION", "dev"))
+        perf = performance(st); attach_history(board, perf); attach_history(assets, perf)
+    except Exception as exc:
+        errors.append(f"signals log: {type(exc).__name__}: {exc}")                                           # commodities/FX/rates/indices/crypto
     ipos, ipo_cov = build_ipos(raw)                                                      # IPO insights
     coverage = list(coverage) + market_cov + assets_cov + ipo_cov
     with STATE["lock"]:
@@ -148,10 +155,59 @@ def _build_exclusive():
         lk.release()
 
 
+EVAL_EVERY_S = int(os.getenv("VM_EVAL_EVERY_MIN", "180")) * 60
+
+
+def _maybe_evaluate(force=False):
+    """Settle calls whose horizon has passed (needs price history, so it is rate-limited and isolated from the scrape cycle)."""
+    st = Store(); last = st.meta_get("last_eval_at")
+    if not force and last and time.time() - float(last) < EVAL_EVERY_S:
+        return None
+    st.meta_set("last_eval_at", time.time())
+    res = evaluate_outcomes(st); st.meta_set("last_eval_result", json.dumps(res))
+    return res
+
+
+def _admin_ok():
+    tok = os.getenv("VM_ADMIN_TOKEN", "")
+    return not tok or hmac.compare_digest(request.headers.get("X-Admin-Token", ""), tok)
+
+
+_PERF = {}
+
+
+@app.route("/api/performance")
+def api_performance():
+    h = request.args.get("horizon", type=int) or 5
+    h = h if h in HORIZONS else 5
+    kind = request.args.get("kind") if request.args.get("kind") in ("stock", "asset") else None
+    hit = _PERF.get((h, kind))
+    if hit and time.time() - hit[0] < 30:
+        return jsonify(hit[1])
+    out = performance(Store(), h, kind=kind); out["last_eval_at"] = Store().meta_get("last_eval_at")
+    _PERF[(h, kind)] = (time.time(), out)
+    return jsonify(out)
+
+
+@app.route("/api/signals.csv")
+def api_signals_csv():
+    if not _admin_ok():
+        return jsonify({"error": "unauthorized"}), 401
+    return Response(export_csv(Store()), mimetype="text/csv", headers={"Content-Disposition": "attachment; filename=signals_log.csv"})
+
+
+@app.route("/api/evaluate", methods=["POST"])
+def api_evaluate():
+    if not _admin_ok():
+        return jsonify({"error": "unauthorized"}), 401
+    return jsonify(_maybe_evaluate(force=True))
+
+
 def _loop():
     while True:
         try:
             _build_exclusive()
+            _maybe_evaluate()
         except Exception as exc:
             with STATE["lock"]:
                 STATE["errors"] = [str(exc)]

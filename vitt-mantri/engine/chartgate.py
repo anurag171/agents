@@ -14,7 +14,7 @@ def evaluate(bars, action, require=False):
     analog = analog_stats(bars, d) if tech.get("available") else None
     v = confirm(tech, analog)
     new, reason, mult = apply_gate(action, v, require_confirmation=require)
-    s = {"verdict": v["verdict"], "score": v["score"], "reasons": v["reasons"], "as_of": tech.get("as_of"),
+    s = {"verdict": v["verdict"], "score": v["score"], "reasons": v["reasons"], "as_of": tech.get("as_of"), "close": tech.get("close"),
          **{k: tech.get(k) for k in ("trend", "rsi", "atr", "support", "resistance", "entry_zone", "stop", "target", "rr")},
          "analog": {k: analog.get(k) for k in ("n", "hit_rate", "median_ret")} if analog and analog.get("n") else None}
     return v, s, new, reason, mult

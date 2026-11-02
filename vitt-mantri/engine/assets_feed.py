@@ -54,7 +54,7 @@ def build_assets(decoded, fetch=fetch_bars, cfg=None, items=None):
         data = list(pool.map(lambda a: fetch(a["yahoo"]), items))
     rows, ok = [], 0
     for a, d in zip(items, data):
-        row = {"key": a["key"], "label": a["label"], "cls": a["cls"], "unit": a.get("unit", ""), "note": a.get("note", ""), "available": bool(d)}
+        row = {"yahoo": a["yahoo"], "key": a["key"], "label": a["label"], "cls": a["cls"], "unit": a.get("unit", ""), "note": a.get("note", ""), "available": bool(d)}
         score, action, ev = news_bias(counts, cfg, a.get("tags", []), a.get("invert", False))
         row.update(news_score=round(score, 1), action=action, evidence=ev[:4])
         if d:

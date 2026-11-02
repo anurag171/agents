@@ -15,6 +15,7 @@ const store = {
 const DEMO = /[?&]demo=1/.test(location.search);
 const STALE_MIN = 10, GLYPH = { BUY: "▲", SELL: "▼", WATCH: "◆" };
 let DATA = {}, PREV = null, lastFocus = null;
+const TRACK = { at: 0, h: 5, hz: 5, data: null };
 const V = { tab: "signals", side: "ALL", region: "all", src: new Set(), direct: false, q: "", confirmed: false };
 
 function ago(iso) {
@@ -78,6 +79,7 @@ function fillRow(n, r) {
   if (a === "WATCH" && r.lean && r.score_pct != null) flags.append(mk("span", "vchip v-note", `Leaning ${r.lean} ${Math.round(num(r.score_pct))}%`));
   if (r.gated_by_strength) flags.append(mk("span", "vchip v-wait", "Below strength bar"));
   if (r.limited_data) flags.append(mk("span", "vchip v-note", "Limited data"));
+  if (r.history && r.history.enough) flags.append(mk("span", "vchip v-confirm", `Past: ${Math.round(num(r.history.hit_rate) * 100)}% right (n=${num(r.history.n)})`));
   const mid = mk("div", "rm"); mid.append(mk("p", "why", r.why || "Aggregated from live headlines."), meta, flags);
   n.replaceChildren(left, mid, mk("span", "chev", "›"));
 }
@@ -96,7 +98,8 @@ function breakdown(r) {
     const bar = mk("div", "sbar"); bar.style.setProperty("--w", (b.available ? num(b.value_pct) : 0) + "%"); bar.append(mk("i")); d.append(bar, mk("small", "meta", b.note || ""));
     wrap.append(d);
   });
-  wrap.append(mk("p", "meta", "Signal strength = how much agreeing evidence stands behind the call. It is not a probability of profit and is not yet calibrated against outcomes."));
+  if (r.history && r.history.text) wrap.append(mk("p", "", r.history.text));
+  wrap.append(mk("p", "meta", "Signal strength = how much agreeing evidence stands behind the call. It is not a probability of profit; the line above shows how calls like this have actually done so far."));
   return wrap;
 }
 const kv = (k, v) => { const d = mk("div", "kv"); d.append(mk("span", "", k), mk("b", "", v)); return d; };
@@ -266,6 +269,47 @@ function renderIpos() {
   $("emptyI").hidden = items.length > 0;
 }
 
+/* ---------- track record ---------- */
+const pc = (v, d = 0) => (v == null ? "–" : (num(v) * 100).toFixed(d) + "%");
+const sg = (v) => (v == null ? "–" : `${num(v) >= 0 ? "+" : ""}${num(v).toFixed(2)}%`);
+function statRow(label, st, minN) {
+  const tr = mk("tr", st && st.n && !st.enough ? "dim" : ""), n = st ? num(st.n) : 0;
+  const hit = mk("td"); if (n) { hit.append(mk("b", "", pc(st.hit_rate)), mk("small", "", ` (${pc(st.hit_ci[0])}–${pc(st.hit_ci[1])})`)); const b = mk("div", "sbar"); b.style.setProperty("--w", num(st.hit_rate) * 100 + "%"); b.append(mk("i")); hit.append(b); } else hit.textContent = "–";
+  tr.append(mk("td", "", label), mk("td", "", n ? (st.enough ? String(n) : `${n} (need ${minN})`) : "0"), hit, mk("td", "", n && st.excess_hit_rate != null ? pc(st.excess_hit_rate) : "–"), mk("td", "", n ? sg(st.mean_ret) : "–"), mk("td", "", n && st.mean_excess != null ? sg(st.mean_excess) : "–"));
+  return tr;
+}
+function statTable(title, groups, minN) {
+  const wrap = mk("div"); wrap.append(mk("h4", "cap", title));
+  const t = mk("table", "tbl"), hd = mk("thead"), hr = mk("tr");
+  ["Group", "Calls", "Went the called way (95% range)", "Beat the index", "Avg return", "Avg vs index"].forEach((h) => hr.append(mk("th", "", h)));
+  hd.append(hr); const tb = mk("tbody");
+  Object.entries(groups).forEach(([k, st]) => tb.append(statRow(k, st, minN))); t.append(hd, tb); wrap.append(t); return wrap;
+}
+function renderTrackData(d) {
+  const o = d.overall || { n: 0 }, parts = [];
+  $("trackNote").textContent = `${d.logged} calls logged · ${d.settled} settled at ${d.horizon} days · ${d.pending} still waiting`;
+  if (!o.n) parts.push(mk("p", "big", "No settled calls yet."), mk("p", "meta", "Every call is logged when it is made and checked against the price 1, 5 and 20 trading days later. The first results appear after the first horizon passes; a percentage is only shown once 30 calls have settled."));
+  else {
+    parts.push(mk("p", "big", `Of ${o.n} settled calls, ${pc(o.hit_rate)} went the called way over ${d.horizon} trading days (95% range ${pc(o.hit_ci[0])}–${pc(o.hit_ci[1])}).`));
+    if (d.benchmark_up_rate != null) parts.push(mk("p", "meta", `For context, the index itself rose in ${pc(d.benchmark_up_rate)} of those windows, so a high hit rate in a rising market is partly luck. Compare the “beat the index” column.`));
+    parts.push(mk("p", "", d.predictive.verdict));
+  }
+  const buckets = {}; Object.entries(d.by_bucket || {}).forEach(([k, v]) => { if (v.n) buckets[k] = v; });
+  if (Object.keys(buckets).length) parts.push(statTable("By signal strength — does a higher % really do better?", buckets, d.min_n));
+  if (Object.keys(d.by_chart || {}).length) parts.push(statTable("By chart check — does it help?", d.by_chart, d.min_n));
+  const shown = {}; Object.entries(d.by_shown || {}).forEach(([k, v]) => { if (v.n) shown[k] = v; });
+  if (Object.keys(shown).length) parts.push(statTable("Calls shown vs calls held back — do the filters help?", shown, d.min_n));
+  const ul = mk("ul", "meta"); (d.notes || []).forEach((x) => ul.append(mk("li", "", x))); parts.push(ul);
+  $("trackBody").replaceChildren(...parts);
+}
+function renderTrack() {
+  if (TRACK.data && TRACK.h === TRACK.hz && Date.now() - TRACK.at < 30000) return renderTrackData(TRACK.data);
+  const h = TRACK.hz;
+  (DEMO ? Promise.resolve(demoPerf(h)) : fetch(`/api/performance?horizon=${h}`).then((r) => (r.ok ? r.json() : Promise.reject())))
+    .then((d) => { TRACK.data = d; TRACK.h = h; TRACK.at = Date.now(); if (V.tab === "track") renderTrackData(d); })
+    .catch(() => $("trackBody").replaceChildren(mk("p", "empty", "Track record unavailable.")));
+}
+
 /* ---------- kpis, sources, status ---------- */
 function renderKpis() {
   const c = { BUY: 0, SELL: 0, WATCH: 0 };
@@ -295,7 +339,7 @@ function tick() {
   if (stale) b.textContent = `Data is stale — last update ${ago(u)}. Signals may no longer reflect the market.`;
   if (u && $("live").classList.contains("on")) $("liveText").textContent = "live · " + ago(u);
 }
-function renderAll() { renderKpis(); renderSignals(); if (V.tab === "market") renderMarket(); if (V.tab === "assets") renderAssets(); if (V.tab === "ipos") renderIpos(); if (V.tab === "tape") renderTape(); if (V.tab === "sources") renderSources(); }
+function renderAll() { renderKpis(); renderSignals(); if (V.tab === "market") renderMarket(); if (V.tab === "assets") renderAssets(); if (V.tab === "ipos") renderIpos(); if (V.tab === "track") renderTrack(); if (V.tab === "tape") renderTape(); if (V.tab === "sources") renderSources(); }
 function ingest(snap) {
   if (!snap) return;
   DATA = snap; $("skel").hidden = true; renderAll(); tick();
@@ -303,7 +347,7 @@ function ingest(snap) {
 function setTab(t) {
   V.tab = t;
   document.querySelectorAll("#tabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === t)));
-  ["signals", "market", "assets", "ipos", "tape", "sources"].forEach((v) => ($("v-" + v).hidden = v !== t));
+  ["signals", "market", "assets", "ipos", "track", "tape", "sources"].forEach((v) => ($("v-" + v).hidden = v !== t));
   renderAll();
 }
 
@@ -349,6 +393,7 @@ $("feed").addEventListener("click", (e) => {
   else if (m) m.classList.toggle("open");
 });
 $("mktCols").addEventListener("click", (e) => { const b = e.target.closest(".q"); if (!b) return; (DATA.board || []).some((r) => r.ticker === b.dataset.t) ? openDrawer(b.dataset.t) : toast(b.dataset.t + ": market-driven, no news signal yet"); });
+$("hz").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; TRACK.hz = +b.dataset.h; document.querySelectorAll("#hz button").forEach((x) => x.classList.toggle("on", x === b)); renderTrack(); });
 $("scrim").addEventListener("click", closeDrawer); $("dClose").addEventListener("click", closeDrawer);
 $("refresh").addEventListener("click", refresh); $("palBtn").addEventListener("click", openPal);
 $("theme").addEventListener("click", () => applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark"));
@@ -363,7 +408,7 @@ document.addEventListener("keydown", (e) => {
   const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
   if (e.key === "Escape") closeDrawer();
   else if ((e.key === "/" && !typing) || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k")) { e.preventDefault(); openPal(); }
-  else if (!typing && ["1", "2", "3", "4", "5", "6"].includes(e.key)) setTab(["signals", "market", "assets", "ipos", "tape", "sources"][+e.key - 1]);
+  else if (!typing && ["1", "2", "3", "4", "5", "6", "7"].includes(e.key)) setTab(["signals", "market", "assets", "ipos", "track", "tape", "sources"][+e.key - 1]);
 });
 
 /* ---------- demo data (index.html?demo=1) ---------- */
@@ -375,6 +420,15 @@ function demoChart(a) {
   return { close, sma20: close.map((_, i) => avg(20, i)), sma50: close.map((_, i) => avg(50, i)),
     levels: { support: +(last * 0.96).toFixed(2), resistance: +(last * 1.07).toFixed(2), stop: +(last * 0.94).toFixed(2), target: +(last * 1.07).toFixed(2) },
     entry_zone: [+(last * 0.96).toFixed(2), +(last * 1.01).toFixed(2)] };
+}
+function demoPerf(h) {
+  const st = (n, hit, ret, ex) => ({ n, enough: n >= 30, hit_rate: hit, hit_ci: [Math.max(0, hit - 0.1), Math.min(1, hit + 0.1)], mean_ret: ret, median_ret: ret, excess_hit_rate: hit - 0.04, mean_excess: ex, n_excess: n });
+  return { horizon: h, min_n: 30, logged: 214, settled: 196, pending: 18, overall: st(196, 0.58, 0.9, 0.4), benchmark_up_rate: 0.54,
+    by_bucket: { "0-39%": { n: 0 }, "40-49%": st(22, 0.45, -0.3, -0.5), "50-59%": st(41, 0.51, 0.1, -0.1), "60-69%": st(48, 0.56, 0.6, 0.2), "70-79%": st(44, 0.61, 1.1, 0.6), "80-89%": st(34, 0.65, 1.6, 0.9), "90-100%": st(7, 0.71, 2.0, 1.1) },
+    by_chart: { CONFIRM: st(70, 0.64, 1.4, 0.8), NEUTRAL: st(80, 0.55, 0.6, 0.2), WAIT: st(26, 0.5, 0.1, -0.2), CONTRADICT: st(20, 0.4, -0.8, -1.0) },
+    by_shown: { "shown as BUY/SELL": st(118, 0.62, 1.2, 0.6), "held back to WATCH": st(78, 0.5, 0.2, -0.1) },
+    predictive: { n: 196, ic: 0.18, p_value: 0.011, predictive: true, verdict: "Higher strength has gone with better outcomes so far (rank correlation +0.18, p=0.011, n=196)." },
+    notes: ["Demo data - not real results.", "'Right' = price moved in the called direction; returns exclude costs, slippage and taxes."] };
 }
 function demoData() {
   const sp = (a, b) => Array.from({ length: 40 }, (_, i) => a + ((b - a) * i) / 39 + Math.sin(i / 3) * (b - a) * 0.05);
@@ -400,7 +454,7 @@ function demoData() {
           factors: { listing: [{ factor: "demand", points: 12, why: "subscribed 12.5x overall" }], longterm: [{ factor: "valuation", points: 18, why: "P/E 18 vs peers 25" }] }, disclaimer: "Educational summary, not advice." },
         { name: "Zed Tech", status: "upcoming", verdict: "INSUFFICIENT DATA", listing_score: 50, longterm_score: 50, coverage: 0.1, sources: ["news"], price_band: [50, 52], terms: {}, subscription: {}, flags: [], factors: { listing: [], longterm: [] } }],
       coverage: [{ source: "Market: NSE", raw: 497 }, { source: "Economic Times", raw: 18 }, { source: "Moneycontrol", raw: 12 }, { source: "Reuters", raw: 9 }, { source: "Bloomberg", raw: 0 }],
-    board: [row("ONGC", "BUY", 3.4, 4, "Higher crude lifts upstream realisations.", { chart: ch("CONFIRM", 0.62, 2.1), market: { price: 268.4, change_pct: 3.6, mkt: "IN", flags: [] } }),
+    board: [row("ONGC", "BUY", 3.4, 4, "Higher crude lifts upstream realisations.", { history: { enough: true, n: 34, hit_rate: 0.65, text: "Calls at this strength went the called way 65% of the time over 5 trading days (n=34, 95% range 48%-79%); average +1.6%." }, chart: ch("CONFIRM", 0.62, 2.1), market: { price: 268.4, change_pct: 3.6, mkt: "IN", flags: [] } }),
       row("ZOMATO", "WATCH", 0, 1, "Top gainer: +5.2% — no mapped news explains the move yet.", { origin: "market-mover", score_pct: null, strength: "No news signal", market: { price: 255.1, change_pct: 5.2, mkt: "IN", flags: ["volume 2.4x avg"] } }),
       row("INDIGO", "SELL", -2.9, 4, "Jet fuel costs rise with crude; margins squeezed.", { chart: ch("CONTRADICT", -0.31, 1.1), news_action: "SELL" }),
       row("RELIANCE", "WATCH", 1.1, 2, "Refining gains offset by retail softness.", { news_action: "BUY", chart: ch("WAIT", 0.18, 1.2), priced_in: true }),

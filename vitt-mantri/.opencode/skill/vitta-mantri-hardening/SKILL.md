@@ -316,6 +316,12 @@ cross-outlet event clustering (one story = one event, corroboration capped at 1.
 
 Recommendation strength as % (`engine/scoring.py`): 6 weighted components with breakdown, coverage-aware, minimum-strength gate (`VM_MIN_SIGNAL_PCT`, default 60) so one weak headline cannot stay a BUY. NOT calibrated: `calibrated=false` until the signals log + backtest exist.
 
-Still open (do next, in this order): signals log + backtest + calibration of the % to observed hit rates + A/B of chart verdicts (P6); recency decay in `aggregate_board` (P4);
-honest-UA default and dropping dead/paywalled sources after a source-yield audit (P1); structured logging/metrics, Docker non-root image (P7).
+Signals log + track record (`engine/store.py`, `engine/signal_log.py`, `/api/performance`, `/api/signals.csv`, Track record tab):
+- Storage: SQLite (WAL) at `$VM_DB` or `$VM_DATA/vm.sqlite`. Chosen over a hosted DB (e.g. Supabase) because the environment is internet-restricted and a single writer + few readers is SQLite's sweet spot; plain SQL keeps a later Postgres move to a connection swap. **VM_DATA must be a persistent volume (PVC).** Back up via `/api/signals.csv`.
+- Logging: one row when the news-implied direction changes (not per cycle); downgraded calls are logged as shadow calls so filters can be A/B tested; versioned by `scoring_version`.
+- Settling: entry = price shown at the call, exit = close h trading days after the emission date (h=1/5/20); no look-ahead; excess vs Nifty 50 / S&P 500; costs not included.
+- Reporting: per strength bucket n, hit rate with Wilson 95% range; percentage shown only at n>=30; permutation-tested rank correlation says whether strength predicts outcomes; settling runs every `VM_EVAL_EVERY_MIN` (default 180).
+
+Still open (do next, in this order): auto-disable themes whose lower confidence bound is <= 0 at n>=30 (gating with audit log); recalibrate `scoring.W` weights only on held-out data and bump `SCORING_VERSION`;
+recency decay in `aggregate_board` (P4); honest-UA default and dropping dead/paywalled sources after a source-yield audit (P1); structured logging/metrics, Docker non-root image (P7).
 Unverified from the build sandbox (check on first run): NSE/Yahoo endpoint formats - failures show up as `error` in `/api/briefing` coverage.
