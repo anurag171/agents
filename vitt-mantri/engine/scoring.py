@@ -18,11 +18,30 @@ under 70% coverage the label never exceeds "Strong".
 A BUY/SELL whose strength is below VM_MIN_SIGNAL_PCT (default 60) is shown as WATCH, keeping the original call."""
 from __future__ import annotations
 
+import json
 import math
 import os
 
-SCORING_VERSION = "s1"          # bump when weights/formula change: the log never mixes versions
-W = {"news": 0.30, "consistency": 0.10, "corroboration": 0.15, "source": 0.10, "chart": 0.25, "market": 0.10}
+DEFAULT_W = {"news": 0.30, "consistency": 0.10, "corroboration": 0.15, "source": 0.10, "chart": 0.25, "market": 0.10}
+DEFAULT_VERSION = "s1"
+WEIGHTS_FILE = os.getenv("VM_SCORING_WEIGHTS") or os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "scoring_weights.json")
+
+
+def _load_weights():
+    """Weights only change through an ADOPTED, held-out-validated tuning run (engine/tuning.py) which writes this file
+    and bumps the version, so the signals log never mixes formulas."""
+    try:
+        with open(WEIGHTS_FILE) as fh:
+            d = json.load(fh)
+        w = {k: float(v) for k, v in d["weights"].items()}
+        if set(w) == set(DEFAULT_W) and abs(sum(w.values()) - 1) < 1e-6 and all(v > 0 for v in w.values()):
+            return w, str(d["version"])
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    return dict(DEFAULT_W), DEFAULT_VERSION
+
+
+W, SCORING_VERSION = _load_weights()
 LABEL = {"news": "News strength", "consistency": "Evidence agrees", "corroboration": "Independent confirmation", "source": "Source quality",
          "chart": "Chart check", "market": "Market reaction"}
 GRADE_Q = {"A": 1.0, "B": 0.7, "C": 0.4}
@@ -63,13 +82,19 @@ def _market_value(row, d):
     return val, f"{chg:+.1f}% today - {why}"
 
 
+def pct_from_components(comps, weights=None):
+    """THE strength formula (used live and by offline tuning). Returns (unrounded pct 0-100, weight coverage 0-1)."""
+    w = weights or W
+    avail = {k: v for k, v in comps.items() if v is not None and k in w}
+    wsum = sum(w[k] for k in avail)
+    pct = 100 * sum(w[k] * v for k, v in avail.items()) / wsum if wsum else 0.0
+    return max(0.0, min(100.0, 50 + (pct - 50) * wsum)), wsum
+
+
 def _finish(row, comps, notes, lean):
-    avail = {k: v for k, v in comps.items() if v is not None}
-    wsum = sum(W[k] for k in avail)
-    pct = 100 * sum(W[k] * v for k, v in avail.items()) / wsum if wsum else 0.0
+    pct, wsum = pct_from_components(comps)
     limited = wsum < LIMITED_COVERAGE
-    pct = 50 + (pct - 50) * wsum
-    pct = int(round(max(0, min(100, pct))))
+    pct = int(round(pct))
     row.update(score_pct=pct, strength=label(min(pct, 79) if limited else pct), lean=lean, data_coverage_pct=int(round(wsum * 100)), limited_data=limited, calibrated=False, scoring_version=SCORING_VERSION,
                conviction=max(1, min(5, math.ceil(pct / 20))),
                signal_breakdown=[{"key": k, "label": LABEL[k], "weight_pct": int(W[k] * 100), "available": comps.get(k) is not None,

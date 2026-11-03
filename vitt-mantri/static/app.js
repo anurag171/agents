@@ -15,7 +15,7 @@ const store = {
 const DEMO = /[?&]demo=1/.test(location.search);
 const STALE_MIN = 10, GLYPH = { BUY: "▲", SELL: "▼", WATCH: "◆" };
 let DATA = {}, PREV = null, lastFocus = null;
-const TRACK = { at: 0, h: 5, hz: 5, data: null };
+const TRACK = { at: 0, h: 5, hz: 5, data: null, theme: null };
 const V = { tab: "signals", side: "ALL", region: "all", src: new Set(), direct: false, q: "", confirmed: false };
 
 function ago(iso) {
@@ -78,6 +78,7 @@ function fillRow(n, r) {
   if (r.priced_in) flags.append(mk("span", "vchip v-wait", "Priced in"));
   if (a === "WATCH" && r.lean && r.score_pct != null) flags.append(mk("span", "vchip v-note", `Leaning ${r.lean} ${Math.round(num(r.score_pct))}%`));
   if (r.gated_by_strength) flags.append(mk("span", "vchip v-wait", "Below strength bar"));
+  if (r.demoted_theme) flags.append(mk("span", "vchip v-contradict", "Theme demoted: poor track record"));
   if (r.limited_data) flags.append(mk("span", "vchip v-note", "Limited data"));
   if (r.history && r.history.enough) flags.append(mk("span", "vchip v-confirm", `Past: ${Math.round(num(r.history.hit_rate) * 100)}% right (n=${num(r.history.n)})`));
   const mid = mk("div", "rm"); mid.append(mk("p", "why", r.why || "Aggregated from live headlines."), meta, flags);
@@ -166,6 +167,7 @@ function fillCard(n, it) {
   const t = mk("div", "top2");
   t.append(mk("span", "", `${it.region || ""} · ${it.source} · grade ${it.source_grade ?? "–"}`), mk("span", "", ago(it.published_at || it.fetched_at)),
     mk("span", "", it.theme || ""), mk("span", "badge" + (it.interpreted_by === "ai" ? " ai" : ""), it.interpreted_by === "ai" ? "AI" : "rules"));
+  if (it.theme_demoted) { const b = mk("span", "badge", "theme demoted"); b.title = "This theme's calls have clearly not beaten the market; they are shown as WATCH."; t.append(b); }
   if (num(it.n_sources) > 1) { const b = mk("span", "badge ai", `+${num(it.n_sources) - 1} outlets`); b.title = "Also reported by: " + (it.sources || []).join(", "); t.append(b); }
   const h = mk("h3"), l = mk("a", "", it.title); l.href = safeUrl(it.url); l.target = "_blank"; l.rel = "noopener noreferrer"; h.append(l);
   const m = mk("p", "meaning", it.meaning || ""); m.title = "Click to expand";
@@ -285,7 +287,26 @@ function statTable(title, groups, minN) {
   hd.append(hr); const tb = mk("tbody");
   Object.entries(groups).forEach(([k, st]) => tb.append(statRow(k, st, minN))); t.append(hd, tb); wrap.append(t); return wrap;
 }
-function renderTrackData(d) {
+const SCLS = { proven: "v-confirm", unproven: "v-neutral", building: "v-unavailable", poor: "v-contradict" };
+function themeSection(th) {
+  if (!th || !(th.themes || []).length) return mk("p", "meta", "Theme health appears once calls have settled.");
+  const wrap = mk("div"); wrap.append(mk("h4", "cap", "Theme health — which news themes actually work?"), mk("p", "meta", th.rule));
+  const t = mk("table", "tbl"), hd = mk("thead"), hr = mk("tr");
+  ["Theme", "Applies to", "Status", "Independent observations", `Avg vs index (${Math.round(num(th.confidence) * 100)}% range)`, "Since"].forEach((h) => hr.append(mk("th", "", h)));
+  hd.append(hr); const tb = mk("tbody");
+  th.themes.forEach((g) => {
+    const tr = mk("tr", g.status === "building" ? "dim" : ""), st = mk("td");
+    st.append(mk("span", "vchip " + (SCLS[g.status] || "v-note"), g.status === "poor" ? "Demoted" : g.status));
+    tr.append(mk("td", "", g.label || g.theme_id), mk("td", "", g.kind === "asset" ? "assets" : "stocks"), st,
+      mk("td", "", g.status === "building" ? `${num(g.n_independent)} of ${num(th.min_independent)}` : `${num(g.n_independent)} (${num(g.n_calls)} calls)`),
+      mk("td", "", g.ci_lo == null ? "–" : `${sg(g.mean_excess / 100)} (${sg(g.ci_lo / 100)} to ${sg(g.ci_hi / 100)})`), mk("td", "", (g.since || "").slice(0, 10)));
+    tb.append(tr);
+  });
+  t.append(hd, tb); wrap.append(t);
+  if ((th.log || []).length) { wrap.append(mk("h4", "cap", "Recent status changes (audit log)")); const ul = mk("ul", "meta"); th.log.slice(0, 8).forEach((e) => ul.append(mk("li", "", `${(e.at || "").slice(0, 10)} · ${e.theme_id} (${e.kind}): ${e.old_status || "new"} → ${e.new_status} — ${e.reason}`))); wrap.append(ul); }
+  return wrap;
+}
+function renderTrackData(d, th) {
   const o = d.overall || { n: 0 }, parts = [];
   $("trackNote").textContent = `${d.logged} calls logged · ${d.settled} settled at ${d.horizon} days · ${d.pending} still waiting`;
   if (!o.n) parts.push(mk("p", "big", "No settled calls yet."), mk("p", "meta", "Every call is logged when it is made and checked against the price 1, 5 and 20 trading days later. The first results appear after the first horizon passes; a percentage is only shown once 30 calls have settled."));
@@ -299,14 +320,17 @@ function renderTrackData(d) {
   if (Object.keys(d.by_chart || {}).length) parts.push(statTable("By chart check — does it help?", d.by_chart, d.min_n));
   const shown = {}; Object.entries(d.by_shown || {}).forEach(([k, v]) => { if (v.n) shown[k] = v; });
   if (Object.keys(shown).length) parts.push(statTable("Calls shown vs calls held back — do the filters help?", shown, d.min_n));
+  parts.push(themeSection(th));
   const ul = mk("ul", "meta"); (d.notes || []).forEach((x) => ul.append(mk("li", "", x))); parts.push(ul);
   $("trackBody").replaceChildren(...parts);
 }
 function renderTrack() {
-  if (TRACK.data && TRACK.h === TRACK.hz && Date.now() - TRACK.at < 30000) return renderTrackData(TRACK.data);
+  if (TRACK.data && TRACK.h === TRACK.hz && Date.now() - TRACK.at < 30000) return renderTrackData(TRACK.data, TRACK.theme);
   const h = TRACK.hz;
-  (DEMO ? Promise.resolve(demoPerf(h)) : fetch(`/api/performance?horizon=${h}`).then((r) => (r.ok ? r.json() : Promise.reject())))
-    .then((d) => { TRACK.data = d; TRACK.h = h; TRACK.at = Date.now(); if (V.tab === "track") renderTrackData(d); })
+  const perf = DEMO ? Promise.resolve(demoPerf(h)) : fetch(`/api/performance?horizon=${h}`).then((r) => (r.ok ? r.json() : Promise.reject()));
+  const theme = DEMO ? Promise.resolve(demoTheme()) : fetch("/api/theme-health").then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  Promise.all([perf, theme])
+    .then(([d, th]) => { TRACK.data = d; TRACK.theme = th; TRACK.h = h; TRACK.at = Date.now(); if (V.tab === "track") renderTrackData(d, th); })
     .catch(() => $("trackBody").replaceChildren(mk("p", "empty", "Track record unavailable.")));
 }
 
@@ -421,6 +445,13 @@ function demoChart(a) {
     levels: { support: +(last * 0.96).toFixed(2), resistance: +(last * 1.07).toFixed(2), stop: +(last * 0.94).toFixed(2), target: +(last * 1.07).toFixed(2) },
     entry_zone: [+(last * 0.96).toFixed(2), +(last * 1.01).toFixed(2)] };
 }
+function demoTheme() {
+  const g = (theme_id, label, kind, status, n, calls, mean, lo, hi, since) => ({ theme_id, label, kind, status, n_independent: n, n_calls: calls, mean_excess: mean, ci_lo: lo, ci_hi: hi, since });
+  return { min_independent: 30, confidence: 0.99, window_days: 180, rule: "Demoted only when the upper 99% bound of average excess return is <= 0 over at least 30 independent theme-days in the last 180 days.",
+    themes: [g("rbi_pause", "RBI pause", "stock", "poor", 41, 130, -1.2, -2.0, -0.3, "2026-10-02T00:00:00"), g("ai_boom", "AI boom", "stock", "unproven", 36, 90, 0.2, -0.7, 1.1, "2026-09-20T00:00:00"),
+      g("oil_up", "Crude / diesel rising", "stock", "proven", 52, 210, 1.1, 0.3, 1.9, "2026-08-11T00:00:00"), g("gold_bid", "Gold bid", "asset", "building", 12, 14, null, null, null, "2026-10-20T00:00:00")],
+    log: [{ at: "2026-10-02T09:00:00", theme_id: "rbi_pause", kind: "stock", old_status: "unproven", new_status: "poor", reason: "upper 99% bound -0.30% <= 0 over 41 independent observations: clearly not beating the benchmark" }] };
+}
 function demoPerf(h) {
   const st = (n, hit, ret, ex) => ({ n, enough: n >= 30, hit_rate: hit, hit_ci: [Math.max(0, hit - 0.1), Math.min(1, hit + 0.1)], mean_ret: ret, median_ret: ret, excess_hit_rate: hit - 0.04, mean_excess: ex, n_excess: n });
   return { horizon: h, min_n: 30, logged: 214, settled: 196, pending: 18, overall: st(196, 0.58, 0.9, 0.4), benchmark_up_rate: 0.54,
@@ -457,14 +488,14 @@ function demoData() {
     board: [row("ONGC", "BUY", 3.4, 4, "Higher crude lifts upstream realisations.", { history: { enough: true, n: 34, hit_rate: 0.65, text: "Calls at this strength went the called way 65% of the time over 5 trading days (n=34, 95% range 48%-79%); average +1.6%." }, chart: ch("CONFIRM", 0.62, 2.1), market: { price: 268.4, change_pct: 3.6, mkt: "IN", flags: [] } }),
       row("ZOMATO", "WATCH", 0, 1, "Top gainer: +5.2% — no mapped news explains the move yet.", { origin: "market-mover", score_pct: null, strength: "No news signal", market: { price: 255.1, change_pct: 5.2, mkt: "IN", flags: ["volume 2.4x avg"] } }),
       row("INDIGO", "SELL", -2.9, 4, "Jet fuel costs rise with crude; margins squeezed.", { chart: ch("CONTRADICT", -0.31, 1.1), news_action: "SELL" }),
-      row("RELIANCE", "WATCH", 1.1, 2, "Refining gains offset by retail softness.", { news_action: "BUY", chart: ch("WAIT", 0.18, 1.2), priced_in: true }),
+      row("RELIANCE", "WATCH", 1.1, 2, "Refining gains offset by retail softness.", { news_action: "BUY", chart: ch("WAIT", 0.18, 1.2), demoted_theme: true }),
       row("HDFCBANK", "BUY", 2.2, 3, "Rate pause supports net interest margin outlook.", { chart: ch("NEUTRAL", 0.1, 1.7) }),
       row("TCS", "SELL", -1.8, 2, "Stronger rupee trims USD revenue translation.", { regions: ["India"] })],
     news: [{ id: "1", source: "Reuters", region: "Global", source_grade: "A", theme: "oil_up", interpreted_by: "ai", published_at: now, url: "https://example.com/1",
       title: "Brent crude jumps 4% as Hormuz tensions flare", meaning: "Higher oil raises costs for airlines and paints but lifts upstream producers' realisations.",
       n_sources: 3, sources: ["Reuters", "Moneycontrol", "Economic Times"], direct_buy: [tk("ONGC")], direct_sell: [tk("INDIGO")], indirect_buy: [], indirect_sell: [tk("ASIANPAINT")] },
     { id: "2", source: "Economic Times", region: "India", source_grade: "B", theme: "rbi_pause", interpreted_by: "rules", published_at: now, url: "https://example.com/2",
-      title: "RBI holds repo rate, keeps stance neutral", meaning: "A pause supports rate-sensitive sectors and bank margins.",
+      title: "RBI holds repo rate, keeps stance neutral", theme_demoted: true, meaning: "A pause supports rate-sensitive sectors and bank margins.",
       direct_buy: [tk("HDFCBANK")], direct_sell: [], indirect_buy: [tk("HDFC")], indirect_sell: [] }] };
 }
 

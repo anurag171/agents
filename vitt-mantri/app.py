@@ -10,14 +10,14 @@ from flask import Flask, Response, jsonify, render_template, request, stream_wit
 from engine.ai import apply_ai, configured as ai_configured, interpret_batch
 from engine import snapshot as snapfile
 from engine.cluster import cluster_items
-from engine.decoder import aggregate_board, decode_item, grade_of
+from engine.decoder import THEMES, aggregate_board, decode_item, grade_of
 from engine.locks import FileLock
 from engine.instruments import get_universe
 from engine.assets_feed import build_assets
 from engine.chartgate import chart_for, enrich_board
 from engine.ipo_feed import build_ipos
 from engine.scoring import score_board
-from engine.signal_log import HORIZONS, attach_history, evaluate_outcomes, export_csv, performance, record
+from engine.signal_log import HORIZONS, apply_theme_demotions, attach_history, demoted_themes, evaluate_outcomes, export_csv, performance, record, theme_health, update_theme_gates
 from engine.store import Store
 from engine.movers import derive_lists, fetch_quotes, merge_into_board
 from engine.scraper import scrape_all
@@ -110,7 +110,12 @@ def _build():
     board = score_board(board)                                                           # strength % + breakdown + minimum-strength gate
     assets, assets_cov = build_assets(decoded)
     try:                                                                                 # log every call; attach the observed track record to each %
-        st = Store(); record(st, board, assets, engine_version=os.getenv("VM_VERSION", "dev"))
+        st = Store()
+        dem = demoted_themes(st, "stock")                                                 # themes whose calls have clearly not beaten the market
+        board = apply_theme_demotions(board, dem); assets = apply_theme_demotions(assets, demoted_themes(st, "asset"))
+        for d in decoded:
+            d["theme_demoted"] = d.get("theme_id") in dem
+        record(st, board, assets, engine_version=os.getenv("VM_VERSION", "dev"))
         perf = performance(st); attach_history(board, perf); attach_history(assets, perf)
     except Exception as exc:
         errors.append(f"signals log: {type(exc).__name__}: {exc}")                                           # commodities/FX/rates/indices/crypto
@@ -164,7 +169,9 @@ def _maybe_evaluate(force=False):
     if not force and last and time.time() - float(last) < EVAL_EVERY_S:
         return None
     st.meta_set("last_eval_at", time.time())
-    res = evaluate_outcomes(st); st.meta_set("last_eval_result", json.dumps(res))
+    res = evaluate_outcomes(st)
+    res["theme_changes"] = update_theme_gates(st)                                         # re-check theme health whenever outcomes settle
+    st.meta_set("last_eval_result", json.dumps(res))
     return res
 
 
@@ -187,6 +194,11 @@ def api_performance():
     out = performance(Store(), h, kind=kind); out["last_eval_at"] = Store().meta_get("last_eval_at")
     _PERF[(h, kind)] = (time.time(), out)
     return jsonify(out)
+
+
+@app.route("/api/theme-health")
+def api_theme_health():
+    return jsonify(theme_health(Store(), {k: v.get("label", k) for k, v in THEMES.items()}))
 
 
 @app.route("/api/signals.csv")

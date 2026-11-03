@@ -210,6 +210,7 @@ def aggregate_board(decoded):
         "sources": [],
         "regions": [],
         "grade": "C",
+        "tw": {},
     })
     for news in decoded:
         for s in news["signals"]:
@@ -222,6 +223,9 @@ def aggregate_board(decoded):
             elif s["action"] == "SELL":
                 row["sell"] += weight
                 row["direct_sell" if s["hop"] == "direct" else "indirect_sell"] += weight
+            tid = news.get("theme_id")
+            if tid and tid != "unmapped":
+                row["tw"][tid] = row["tw"].get(tid, 0.0) + (weight if s["action"] == "BUY" else -weight if s["action"] == "SELL" else 0.0)
             if news["title"] not in row["headlines"]:
                 row["headlines"].append(news["title"])
             if s["why"] not in row["whys"]:
@@ -244,9 +248,13 @@ def aggregate_board(decoded):
             action = "SELL"
         else:
             action = "WATCH"
+        sign = 1 if net >= 0 else -1
+        ranked = sorted(((t, w * sign) for t, w in row["tw"].items() if w * sign > 0), key=lambda kv: -kv[1])
         board.append(
             {
                 "ticker": ticker,
+                "primary_theme": ranked[0][0] if ranked else None,
+                "themes": [{"id": t, "label": THEMES.get(t, {}).get("label", t), "weight": round(w, 2)} for t, w in ranked[:3]],
                 "action": action,
                 "net": round(net, 2),
                 "buy_score": round(row["buy"], 2),

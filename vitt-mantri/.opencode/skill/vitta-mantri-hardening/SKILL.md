@@ -322,6 +322,17 @@ Signals log + track record (`engine/store.py`, `engine/signal_log.py`, `/api/per
 - Settling: entry = price shown at the call, exit = close h trading days after the emission date (h=1/5/20); no look-ahead; excess vs Nifty 50 / S&P 500; costs not included.
 - Reporting: per strength bucket n, hit rate with Wilson 95% range; percentage shown only at n>=30; permutation-tested rank correlation says whether strength predicts outcomes; settling runs every `VM_EVAL_EVERY_MIN` (default 180).
 
-Still open (do next, in this order): auto-disable themes whose lower confidence bound is <= 0 at n>=30 (gating with audit log); recalibrate `scoring.W` weights only on held-out data and bump `SCORING_VERSION`;
+Theme gating (`engine/signal_log.py`, `/api/theme-health`): each call records its primary theme; per theme (stocks and assets separately) the average excess return is
+measured over INDEPENDENT theme-days (calls on the same day are averaged: one Brent headline -> six tickers is one observation), last 180 days.
+Status: building (<30 independent days) | proven (lower 99% bound > 0) | unproven (interval straddles 0) | poor (UPPER 99% bound <= 0). Only `poor` demotes: its BUY/SELL show as WATCH
+but are still logged as shadow calls so the theme can recover; it returns after >=14 days and an upper bound above +0.25%. Every change is written to `theme_gate_log` with its reason.
+(A rule on the lower bound would switch off nearly every theme for merely being unproven, so it is deliberately not used.)
+
+Held-out weight tuning (`engine/tuning.py`, CLI `python -m engine.tuning report|adopt|rollback`): time-ordered 60/20/20 split with purging, search on train only, choice on validation only,
+ONE look at the test period, paired bootstrap over days must clear zero at 97.5%; used test windows are recorded and block adoption unless `--allow-reuse`; adoption writes
+`config/scoring_weights.json`, bumps the scoring version (track record restarts) and needs a scheduler restart. Needs >=300 settled calls over >=60 days. Simulated: wrongly adopts on pure noise ~1 in 40,
+adopts strong real edges 30/30, weak edges ~1 in 5 (deliberately conservative). Run `report` rarely (monthly at most): every extra look at overlapping test data makes it less trustworthy.
+
+Still open (do next, in this order): make track-record intervals cluster-aware (calls on the same day are correlated, so the hit-rate ranges are currently optimistic);
 recency decay in `aggregate_board` (P4); honest-UA default and dropping dead/paywalled sources after a source-yield audit (P1); structured logging/metrics, Docker non-root image (P7).
 Unverified from the build sandbox (check on first run): NSE/Yahoo endpoint formats - failures show up as `error` in `/api/briefing` coverage.

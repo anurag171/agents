@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import random
 import statistics
 from datetime import date, datetime, timedelta, timezone
@@ -44,6 +45,7 @@ def call_direction(r: dict) -> int:
 
 def _gate_reason(r):
     if r.get("gated_by_strength"): return "strength"
+    if r.get("demoted_theme"): return "theme_demoted"
     if r.get("priced_in"): return "priced_in"
     v = (r.get("chart") or {}).get("verdict")
     return f"chart:{v.lower()}" if r.get("action") == "WATCH" and v in ("WAIT", "CONTRADICT") else None
@@ -78,11 +80,11 @@ def record(store: Store, board: list, assets: list, now: datetime | None = None,
                 ev = {"headlines": (r.get("headlines") or [])[:3], "sources": (r.get("sources") or [])[:6], "evidence": [e.get("theme") for e in r.get("evidence") or []][:4]}
                 cur = c.execute("""INSERT OR IGNORE INTO signals_log(emitted_at,emitted_date,kind,ticker,yahoo,mkt,direction,news_action,final_action,gate_reason,score_pct,strength,
                     coverage_pct,limited_data,net,chart_verdict,chart_score,market_change_pct,priced_in,best_grade,n_events,n_sources,price_at_signal,breakdown_json,evidence_json,
-                    scoring_version,engine_version) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    scoring_version,engine_version,primary_theme,themes_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                                    (now.isoformat(), now.date().isoformat(), kind, ticker, yahoo, mkt, d, r.get("news_action") or r["action"], r["action"], _gate_reason(r),
                                     r.get("score_pct"), r.get("strength"), r.get("data_coverage_pct"), int(bool(r.get("limited_data"))), r.get("net") if kind == "stock" else r.get("news_score"),
                                     ch.get("verdict"), ch.get("score"), mk.get("change_pct"), int(bool(r.get("priced_in"))), r.get("best_grade"), r.get("events"), len(r.get("sources") or []),
-                                    price, json.dumps(r.get("signal_breakdown") or []), json.dumps(ev), r.get("scoring_version") or SCORING_VERSION, engine_version))
+                                    price, json.dumps(r.get("signal_breakdown") or []), json.dumps(ev), r.get("scoring_version") or SCORING_VERSION, engine_version, r.get("primary_theme"), json.dumps(r.get("themes") or r.get("evidence") and [{"id": e.get("theme_id"), "label": e.get("theme")} for e in r["evidence"]] or [])))
                 new += cur.rowcount
     return new
 
@@ -252,3 +254,102 @@ def export_csv(store: Store, limit: int = 5000) -> str:
     if rows:
         w.writerow(rows[0].keys()); w.writerows([tuple(r) for r in rows])
     return buf.getvalue()
+
+
+# ---------------------------------------------------------------- theme health & demotion
+THEME_MIN_N = int(os.getenv("VM_THEME_MIN_N", "30"))          # INDEPENDENT observations (theme-days), not calls
+THEME_WINDOW_DAYS, DEMOTE_CONF, REENABLE_MARGIN, MIN_DWELL_DAYS = 180, 0.99, 0.25, 14
+
+
+def bootstrap_mean_ci(xs: list, conf: float = DEMOTE_CONF, iters: int = 2000, seed: int = 11):
+    rnd, n = random.Random(seed), len(xs)
+    means = sorted(statistics.fmean(rnd.choices(xs, k=n)) for _ in range(iters))
+    a = (1 - conf) / 2
+    return means[int(a * iters)], means[min(iters - 1, int((1 - a) * iters))]
+
+
+def theme_observations(store: Store, horizon: int = HEADLINE_H, now: datetime | None = None) -> dict:
+    """{(theme, kind): [one number per emission DATE]}. Calls made on the same day from the same theme (one Brent headline ->
+    six tickers) move together, so they are averaged into ONE independent observation; counting them separately would
+    overstate the evidence and demote/promote themes on noise. Metric: excess over the benchmark where available."""
+    since = ((now or _now()) - timedelta(days=THEME_WINDOW_DAYS)).date().isoformat()
+    with store.conn() as c:
+        rows = c.execute("""SELECT s.primary_theme t, s.kind k, s.emitted_date d, COALESCE(o.signed_excess_pct, o.signed_ret_pct) y
+                 FROM signals_log s JOIN signal_outcomes o ON o.signal_id=s.id
+                 WHERE o.horizon=? AND s.primary_theme IS NOT NULL AND s.emitted_date>=?""", (horizon, since)).fetchall()
+    cells = {}
+    for r in rows:
+        cells.setdefault((r["t"], r["k"], r["d"]), []).append(r["y"])
+    out, ncalls = {}, {}
+    for (t, k, d), ys in cells.items():
+        out.setdefault((t, k), []).append(statistics.fmean(ys)); ncalls[(t, k)] = ncalls.get((t, k), 0) + len(ys)
+    return {key: {"obs": v, "n_calls": ncalls[key]} for key, v in out.items()}
+
+
+def classify(obs: list, prev_status: str | None, days_in_status: float, conf: float = DEMOTE_CONF):
+    """building (<N independent obs) | proven (lower bound > 0) | unproven (interval straddles 0) | poor (upper bound <= 0).
+    Only 'poor' demotes. A poor theme returns only after MIN_DWELL_DAYS and when its upper bound clears +REENABLE_MARGIN,
+    so a theme hovering at the boundary cannot flap on and off."""
+    n = len(obs)
+    if n < THEME_MIN_N:
+        return "building", None
+    lo, hi = bootstrap_mean_ci(obs, conf)
+    ci = (round(lo, 3), round(hi, 3))
+    if prev_status == "poor":
+        if days_in_status < MIN_DWELL_DAYS or hi <= REENABLE_MARGIN:
+            return "poor", ci
+    if hi <= 0:
+        return "poor", ci
+    return ("proven" if lo > 0 else "unproven"), ci
+
+
+def update_theme_gates(store: Store, horizon: int = HEADLINE_H, now: datetime | None = None) -> list:
+    now, changes = now or _now(), []
+    obs = theme_observations(store, horizon, now)
+    with store.conn() as c:
+        prev = {(r["theme_id"], r["kind"]): r for r in c.execute("SELECT * FROM theme_gate").fetchall()}
+        for (theme, kind), v in sorted(obs.items()):
+            p = prev.get((theme, kind))
+            days = (now - datetime.fromisoformat(p["since"])).total_seconds() / 86400 if p else 0.0
+            status, ci = classify(v["obs"], p["status"] if p else None, days)
+            mean = statistics.fmean(v["obs"]) if v["obs"] else None
+            since = p["since"] if p and p["status"] == status else now.isoformat()
+            c.execute("""INSERT INTO theme_gate(theme_id,kind,status,n_calls,n_independent,mean_excess,ci_lo,ci_hi,since,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)
+                         ON CONFLICT(theme_id,kind) DO UPDATE SET status=excluded.status,n_calls=excluded.n_calls,n_independent=excluded.n_independent,mean_excess=excluded.mean_excess,
+                         ci_lo=excluded.ci_lo,ci_hi=excluded.ci_hi,since=excluded.since,updated_at=excluded.updated_at""",
+                      (theme, kind, status, v["n_calls"], len(v["obs"]), mean, ci[0] if ci else None, ci[1] if ci else None, since, now.isoformat()))
+            if (p["status"] if p else None) != status:
+                reason = (f"upper {int(DEMOTE_CONF * 100)}% bound {ci[1]:+.2f}% <= 0 over {len(v['obs'])} independent observations: clearly not beating the benchmark" if status == "poor" else
+                          f"left 'poor': upper bound {ci[1]:+.2f}% now above the {REENABLE_MARGIN:+.2f}% re-enable margin" if p and p["status"] == "poor" else
+                          f"{len(v['obs'])} independent observations; interval {ci}" if ci else f"{len(v['obs'])} of {THEME_MIN_N} independent observations")
+                c.execute("INSERT INTO theme_gate_log(at,theme_id,kind,old_status,new_status,reason,stats_json) VALUES(?,?,?,?,?,?,?)",
+                          (now.isoformat(), theme, kind, p["status"] if p else None, status, reason, json.dumps({"n_calls": v["n_calls"], "n_independent": len(v["obs"]), "mean": mean, "ci": ci})))
+                changes.append({"theme": theme, "kind": kind, "from": p["status"] if p else None, "to": status, "reason": reason})
+    return changes
+
+
+def demoted_themes(store: Store, kind: str) -> frozenset:
+    with store.conn() as c:
+        return frozenset(r["theme_id"] for r in c.execute("SELECT theme_id FROM theme_gate WHERE kind=? AND status='poor'", (kind,)).fetchall())
+
+
+def apply_theme_demotions(rows: list, demoted) -> list:
+    """BUY/SELL driven mainly by a demoted theme is shown as WATCH. The original call is KEPT in news_action, so it is still
+    logged as a shadow call: the evidence keeps accumulating and the theme can earn its way back."""
+    for r in rows:
+        if demoted and r.get("action") in ("BUY", "SELL") and r.get("primary_theme") in demoted:
+            r.setdefault("news_action", r["action"])
+            r["action"], r["demoted_theme"] = "WATCH", True
+            if "why" in r:
+                r["why"] = f"{r.get('why') or ''} [theme demoted: its calls have clearly not beaten the market]".strip()
+    return rows
+
+
+def theme_health(store: Store, labels: dict | None = None) -> dict:
+    with store.conn() as c:
+        gate = [dict(r) for r in c.execute("SELECT * FROM theme_gate ORDER BY CASE status WHEN 'poor' THEN 0 WHEN 'unproven' THEN 1 WHEN 'building' THEN 2 ELSE 3 END, theme_id").fetchall()]
+        log = [dict(r) for r in c.execute("SELECT at,theme_id,kind,old_status,new_status,reason FROM theme_gate_log ORDER BY id DESC LIMIT 20").fetchall()]
+    for g in gate:
+        g["label"] = (labels or {}).get(g["theme_id"], g["theme_id"])
+    return {"min_independent": THEME_MIN_N, "confidence": DEMOTE_CONF, "window_days": THEME_WINDOW_DAYS, "themes": gate, "log": log,
+            "rule": f"Demoted only when the upper {int(DEMOTE_CONF * 100)}% bound of average excess return is <= 0 over at least {THEME_MIN_N} independent theme-days in the last {THEME_WINDOW_DAYS} days."}

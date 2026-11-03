@@ -8,7 +8,7 @@ import os
 import sqlite3
 from contextlib import contextmanager
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 DDL = """
 CREATE TABLE IF NOT EXISTS signals_log(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -32,6 +32,23 @@ CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT);
 """
 
 
+MIGRATIONS = {
+    2: """
+ALTER TABLE signals_log ADD COLUMN primary_theme TEXT;
+ALTER TABLE signals_log ADD COLUMN themes_json TEXT;
+CREATE TABLE IF NOT EXISTS theme_gate(
+  theme_id TEXT NOT NULL, kind TEXT NOT NULL, status TEXT NOT NULL, n_calls INTEGER, n_independent INTEGER,
+  mean_excess REAL, ci_lo REAL, ci_hi REAL, since TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(theme_id, kind));
+CREATE TABLE IF NOT EXISTS theme_gate_log(
+  id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, theme_id TEXT NOT NULL, kind TEXT NOT NULL,
+  old_status TEXT, new_status TEXT NOT NULL, reason TEXT, stats_json TEXT);
+CREATE TABLE IF NOT EXISTS tuning_runs(
+  id INTEGER PRIMARY KEY AUTOINCREMENT, run_at TEXT NOT NULL, horizon INTEGER, n_rows INTEGER, train_range TEXT, val_range TEXT, test_range TEXT,
+  test_start TEXT, test_end TEXT, base_json TEXT, cand_json TEXT, metrics_json TEXT, decision TEXT, test_look INTEGER, adopted INTEGER DEFAULT 0);
+""",
+}
+
+
 def db_path() -> str:
     return os.getenv("VM_DB") or os.path.join(os.getenv("VM_DATA", "data"), "vm.sqlite")
 
@@ -41,9 +58,13 @@ class Store:
         self.path = path or db_path()
         os.makedirs(os.path.dirname(os.path.abspath(self.path)), exist_ok=True)
         with self.conn() as c:
-            if c.execute("PRAGMA user_version").fetchone()[0] < SCHEMA_VERSION:
-                c.executescript(DDL)
-                c.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+            v = c.execute("PRAGMA user_version").fetchone()[0]
+            if v < 1:
+                c.executescript(DDL); v = 1
+            for target in sorted(MIGRATIONS):
+                if v < target:
+                    c.executescript(MIGRATIONS[target]); v = target
+            c.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
 
     @contextmanager
     def conn(self):

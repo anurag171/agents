@@ -26,7 +26,7 @@ def count(st, sql="SELECT COUNT(*) c FROM signals_log"):
 def test_schema_is_wal_versioned_and_idempotent(tmp_path):
     p = str(tmp_path / "x.sqlite"); Store(p); s2 = Store(p)
     with s2.conn() as c:
-        assert c.execute("PRAGMA journal_mode").fetchone()[0] == "wal" and c.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert c.execute("PRAGMA journal_mode").fetchone()[0] == "wal" and c.execute("PRAGMA user_version").fetchone()[0] == 2
 
 
 def test_a_call_is_logged_once_not_every_cycle(st):

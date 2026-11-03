@@ -38,7 +38,7 @@ def news_bias(counts, cfg, tags, invert=False):
             if set(r.get("tags", [])) & set(tags):
                 w = (DIRECT_W if r["hop"] == "direct" else INDIRECT_W) * min(n, CAP_ITEMS)
                 score += w if r["action"] == "BUY" else -w
-                ev.append({"theme": cfg[tid]["label"], "effect": r["action"], "why": r["why"], "items": n})
+                ev.append({"theme_id": tid, "theme": cfg[tid]["label"], "effect": r["action"], "why": r["why"], "items": n})
     score = -score if invert else score
     return score, ("BUY" if score >= ENTER else "SELL" if score <= -ENTER else "WATCH"), ev
 
@@ -56,7 +56,7 @@ def build_assets(decoded, fetch=fetch_bars, cfg=None, items=None):
     for a, d in zip(items, data):
         row = {"yahoo": a["yahoo"], "key": a["key"], "label": a["label"], "cls": a["cls"], "unit": a.get("unit", ""), "note": a.get("note", ""), "available": bool(d)}
         score, action, ev = news_bias(counts, cfg, a.get("tags", []), a.get("invert", False))
-        row.update(news_score=round(score, 1), action=action, evidence=ev[:4])
+        row.update(news_score=round(score, 1), action=action, evidence=ev[:4], primary_theme=(max(ev, key=lambda e: e["items"])["theme_id"] if ev else None))
         if d:
             ok += 1
             closes = [b.c for b in d["bars"]]
