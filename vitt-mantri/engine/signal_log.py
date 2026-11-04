@@ -24,7 +24,7 @@ from .bars import fetch_bars, yahoo_symbol
 from .scoring import SCORING_VERSION
 from .store import Store
 
-HORIZONS, HEADLINE_H = (1, 5, 20), 5
+HORIZONS, HEADLINE_H = (1, 5, 20, 60), 5
 MIN_N, MIN_REENTRY_DAYS, SPLIT_GUARD = 30, 5, 0.30
 EDGES = [(0, "0-39%"), (40, "40-49%"), (50, "50-59%"), (60, "60-69%"), (70, "70-79%"), (80, "80-89%"), (90, "90-100%")]
 BENCH = {"IN": "^NSEI", "US": "^GSPC"}
@@ -89,6 +89,37 @@ def record(store: Store, board: list, assets: list, now: datetime | None = None,
     return new
 
 
+SCREEN_REENTRY_DAYS = 30
+
+
+def record_screen(store: Store, picks: list, version: str, now: datetime | None = None, engine_version: str = "dev") -> int:
+    """Log a screen PICK once, when it first qualifies (kind='screen'); settled at 20/60 days like any other call."""
+    now, new = now or _now(), 0
+    current = {p["ticker"] for p in picks if p.get("tier") == "PICK"}
+    with store.conn() as c:
+        for r in c.execute("SELECT ticker FROM signal_state WHERE kind='screen' AND direction=1").fetchall():
+            if r["ticker"] not in current:
+                c.execute("UPDATE signal_state SET direction=0, since=? WHERE kind='screen' AND ticker=?", (now.isoformat(), r["ticker"]))
+        for p in picks:
+            if p.get("tier") != "PICK":
+                continue
+            st = c.execute("SELECT direction FROM signal_state WHERE kind='screen' AND ticker=?", (p["ticker"],)).fetchone()
+            if st and st["direction"] == 1:
+                continue
+            c.execute("INSERT INTO signal_state(kind,ticker,direction,since) VALUES('screen',?,1,?) ON CONFLICT(kind,ticker) DO UPDATE SET direction=1, since=excluded.since", (p["ticker"], now.isoformat()))
+            last = c.execute("SELECT MAX(emitted_at) m FROM signals_log WHERE kind='screen' AND ticker=?", (p["ticker"],)).fetchone()["m"]
+            if last and (now - datetime.fromisoformat(last)).days < SCREEN_REENTRY_DAYS:
+                continue
+            ch = p.get("chart") or {}
+            cur = c.execute("""INSERT OR IGNORE INTO signals_log(emitted_at,emitted_date,kind,ticker,yahoo,mkt,direction,news_action,final_action,score_pct,strength,coverage_pct,limited_data,
+                chart_verdict,chart_score,best_grade,price_at_signal,breakdown_json,evidence_json,scoring_version,engine_version) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (now.isoformat(), now.date().isoformat(), "screen", p["ticker"], yahoo_symbol(p["ticker"], "IN"), "IN", 1, "BUY", "BUY", p.get("score_pct"), p.get("strength"), p.get("coverage_pct"),
+                 int(bool(p.get("price_only"))), ch.get("verdict"), ch.get("score"), None, p.get("price"), json.dumps(p.get("breakdown") or []),
+                 json.dumps({"why": p.get("why"), "flags": p.get("flags")}), version, engine_version))
+            new += cur.rowcount
+    return new
+
+
 # ---------------------------------------------------------------- settling
 def _first_after(bars, d0: date) -> int:
     for i, b in enumerate(bars):
@@ -122,7 +153,7 @@ def evaluate_outcomes(store: Store, fetch=fetch_bars, today: date | None = None,
     today = today or _now().date()
     with store.conn() as c:
         todo = c.execute(f"""SELECT s.id, s.yahoo, s.mkt, s.kind, s.direction, s.emitted_date, s.price_at_signal, h.h AS horizon FROM signals_log s
-                 JOIN (SELECT 1 h UNION SELECT 5 UNION SELECT 20) h LEFT JOIN signal_outcomes o ON o.signal_id=s.id AND o.horizon=h.h
+                 JOIN (SELECT 1 h UNION SELECT 5 UNION SELECT 20 UNION SELECT 60) h LEFT JOIN signal_outcomes o ON o.signal_id=s.id AND o.horizon=h.h
                  WHERE o.signal_id IS NULL AND s.yahoo IS NOT NULL ORDER BY s.emitted_date""").fetchall()
     due = [t for t in todo if (today - date.fromisoformat(t["emitted_date"])).days >= t["horizon"]]
     by_sym = {}
@@ -138,7 +169,7 @@ def evaluate_outcomes(store: Store, fetch=fetch_bars, today: date | None = None,
         if not b:
             continue
         for t in by_sym[sym]:
-            bench = bars(BENCH[t["mkt"]]) if t["kind"] == "stock" and t["mkt"] in BENCH else None
+            bench = bars(BENCH[t["mkt"]]) if t["kind"] in ("stock", "screen") and t["mkt"] in BENCH else None
             o = compute_outcome(b, date.fromisoformat(t["emitted_date"]), t["direction"], t["price_at_signal"], t["horizon"], bench)
             if not o:
                 continue

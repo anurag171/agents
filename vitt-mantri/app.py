@@ -10,6 +10,8 @@ from flask import Flask, Response, jsonify, render_template, request, stream_wit
 from engine.ai import apply_ai, configured as ai_configured, interpret_batch
 from engine import snapshot as snapfile
 from engine.cluster import cluster_items
+from engine.instruments import grow_universe
+from engine.screener import SCREEN_VERSION, run_screen
 from engine.decoder import THEMES, aggregate_board, decode_item, grade_of
 from engine.locks import FileLock
 from engine.instruments import get_universe
@@ -17,7 +19,7 @@ from engine.assets_feed import build_assets
 from engine.chartgate import chart_for, enrich_board
 from engine.ipo_feed import build_ipos
 from engine.scoring import score_board
-from engine.signal_log import HORIZONS, apply_theme_demotions, attach_history, demoted_themes, evaluate_outcomes, export_csv, performance, record, theme_health, update_theme_gates
+from engine.signal_log import HORIZONS, record_screen, apply_theme_demotions, attach_history, demoted_themes, evaluate_outcomes, export_csv, performance, record, theme_health, update_theme_gates
 from engine.store import Store
 from engine.movers import derive_lists, fetch_quotes, merge_into_board
 from engine.scraper import scrape_all
@@ -57,6 +59,7 @@ REFRESH_SECONDS = 90
 DATA_DIR = os.getenv("VM_DATA", "data")
 ROLE = os.getenv("VM_ROLE", "all")                      # all | scheduler | web  (web = never scrapes, only serves)
 SNAP_PATH = os.path.join(DATA_DIR, "snapshot.json")
+DISC_PATH = os.path.join(DATA_DIR, "discovery.json")
 SCHED = {"pid": None, "lock": None, "active": False}
 
 
@@ -104,9 +107,16 @@ def _build():
     decoded = apply_ai(decoded, ai_map, interpreter)
     board = aggregate_board(decoded)
     quotes, market_cov = fetch_quotes()                      # cached ~2 min, never raises
+    try:
+        uni = get_universe()
+        if grow_universe(uni, quotes):                       # every NSE symbol in the live snapshot becomes a known instrument
+            uni.save()
+    except Exception as exc:
+        errors.append(f"universe growth: {type(exc).__name__}: {exc}")
     lists = derive_lists(quotes)
     board = merge_into_board(board, quotes, lists)           # market reaction on news rows + unexplained big movers
     board = enrich_board(board, require=os.getenv("VM_REQUIRE_CHART_CONFIRM") == "1")   # chart verdict + entry range
+    STATE["news_symbols"] = {r["ticker"] for r in board if r.get("origin") != "market-mover" and r.get("headlines")}
     board = score_board(board)                                                           # strength % + breakdown + minimum-strength gate
     assets, assets_cov = build_assets(decoded)
     try:                                                                                 # log every call; attach the observed track record to each %
@@ -142,7 +152,8 @@ def _snapshot():
     """Web workers don't scrape: they serve the snapshot the scheduler process wrote (falls back to local state)."""
     shared = snapfile.read(SNAP_PATH)
     if shared is not None:
-        return dict(shared)
+        out = dict(shared); out["discovery"] = snapfile.read(DISC_PATH)
+        return out
     with STATE["lock"]:
         return _pack(list(STATE["news"]), list(STATE["board"]), list(STATE["errors"]), list(STATE["coverage"]),
                      STATE["updated_at"], STATE["cycle"], STATE.get("interpreter") or "rules")
@@ -158,6 +169,41 @@ def _build_exclusive():
         return _build()
     finally:
         lk.release()
+
+
+SCREEN = {"running": False}
+SCREEN_FILL_EVERY_S = int(os.getenv("VM_SCREEN_FILL_EVERY_MIN", "30")) * 60       # while fundamentals are still being filled in
+SCREEN_EVERY_S = int(os.getenv("VM_SCREEN_EVERY_H", "12")) * 3600                 # once the fill is complete
+
+
+def _screen_job(news_symbols):
+    try:
+        st = Store()
+        payload = run_screen(st, get_universe(), news_symbols=news_symbols, max_symbols=int(os.getenv("VM_SCREEN_MAX", "600")))
+        payload["logged"] = record_screen(st, payload["picks"], SCREEN_VERSION, engine_version=os.getenv("VM_VERSION", "dev"))
+        u = payload["universe"]
+        st.meta_set("screen_fill", f"{u['with_fundamentals'] / max(1, u['eligible']):.3f}")
+        snapfile.write(DISC_PATH, payload)
+    except Exception as exc:
+        st = Store(); st.meta_set("screen_error", f"{type(exc).__name__}: {exc}")
+    finally:
+        SCREEN["running"] = False
+
+
+def _maybe_screen(force=False):
+    """Background thread (hundreds of price/fundamentals requests must never stall the 90 s news cycle)."""
+    if SCREEN["running"]:
+        return False
+    st = Store(); last, fill = st.meta_get("last_screen_at"), float(st.meta_get("screen_fill", "0") or 0)
+    every = SCREEN_FILL_EVERY_S if fill < 0.9 else SCREEN_EVERY_S
+    if not force and last and time.time() - float(last) < every:
+        return False
+    st.meta_set("last_screen_at", time.time())              # rate-limit attempts, not just successes
+    SCREEN["running"] = True
+    with STATE["lock"]:
+        ns = set(STATE.get("news_symbols") or ())
+    threading.Thread(target=_screen_job, args=(ns,), daemon=True, name="vm-screen").start()
+    return True
 
 
 EVAL_EVERY_S = int(os.getenv("VM_EVAL_EVERY_MIN", "180")) * 60
@@ -187,11 +233,12 @@ _PERF = {}
 def api_performance():
     h = request.args.get("horizon", type=int) or 5
     h = h if h in HORIZONS else 5
-    kind = request.args.get("kind") if request.args.get("kind") in ("stock", "asset") else None
+    kind = request.args.get("kind") if request.args.get("kind") in ("stock", "asset", "screen") else None
     hit = _PERF.get((h, kind))
     if hit and time.time() - hit[0] < 30:
         return jsonify(hit[1])
-    out = performance(Store(), h, kind=kind); out["last_eval_at"] = Store().meta_get("last_eval_at")
+    out = performance(Store(), h, scoring_version=SCREEN_VERSION, kind=kind) if kind == "screen" else performance(Store(), h, kind=kind)
+    out["last_eval_at"] = Store().meta_get("last_eval_at")
     _PERF[(h, kind)] = (time.time(), out)
     return jsonify(out)
 
@@ -199,6 +246,16 @@ def api_performance():
 @app.route("/api/theme-health")
 def api_theme_health():
     return jsonify(theme_health(Store(), {k: v.get("label", k) for k, v in THEMES.items()}))
+
+
+@app.route("/api/discovery")
+def api_discovery():
+    d = snapfile.read(DISC_PATH)
+    if d is None:
+        return jsonify({"picks": [], "watchlist": [], "pending": True, "message": "The first screen has not finished yet."})
+    out = dict(d); perf = performance(Store(), 20, scoring_version=SCREEN_VERSION, kind="screen")
+    out["track"] = {"horizon": 20, "settled": perf["settled"], "pending": perf["pending"], "overall": perf["overall"]}
+    return jsonify(out)
 
 
 @app.route("/api/signals.csv")
@@ -220,6 +277,7 @@ def _loop():
         try:
             _build_exclusive()
             _maybe_evaluate()
+            _maybe_screen()
         except Exception as exc:
             with STATE["lock"]:
                 STATE["errors"] = [str(exc)]

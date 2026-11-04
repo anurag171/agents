@@ -91,6 +91,8 @@ dialog li.sel,dialog li:hover{background:var(--surface-2)}dialog small{color:var
 .card details{margin-top:6px;font-size:13px;color:var(--muted)}.card details li{margin:2px 0}.warn{font-size:12px;color:var(--watch);margin:4px 0}
 .bk{display:grid;grid-template-columns:1fr auto;gap:2px 10px;margin-bottom:10px;font-size:13px}.bk .sbar,.bk small{grid-column:1/-1}.bk .sbar{margin:2px 0}
 .dim{opacity:.55}.tbl .sbar{margin:3px 0 0;min-width:90px}.tbl td small{color:var(--muted)}.big{font-size:18px;line-height:1.4;margin:0 0 6px}.cap{margin:18px 0 8px;font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.fbars{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin:8px 0}.fbars span{font-size:11px;color:var(--muted)}.fbars b{float:right;color:var(--ink)}.facts{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12px;color:var(--muted);margin:2px 0 6px}.card .warnbox{background:color-mix(in srgb,var(--watch) 14%,var(--surface));border:1px solid var(--watch);border-radius:var(--r);padding:8px 12px;font-size:13px;margin:6px 0}
+@media(max-width:560px){.fbars{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:860px){.kpis{grid-template-columns:repeat(3,1fr)}.brand small,#palBtn{display:none}}
 @media(max-width:760px){
  main{padding:14px 14px calc(76px + env(safe-area-inset-bottom))}.top{padding-inline:14px}

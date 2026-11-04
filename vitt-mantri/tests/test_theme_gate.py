@@ -2,7 +2,7 @@ import json, random, sqlite3
 from datetime import datetime, timedelta, timezone
 import pytest
 from engine import signal_log as L
-from engine.store import DDL, Store
+from engine.store import DDL, SCHEMA_VERSION, Store
 
 NOW = datetime(2026, 12, 1, 12, 0, tzinfo=timezone.utc)
 
@@ -32,7 +32,7 @@ def test_v1_database_migrates_to_v2_in_place(tmp_path):
     c.execute("INSERT INTO signals_log(emitted_at,emitted_date,kind,ticker,direction,news_action,final_action,scoring_version) VALUES('2026-01-01T00:00:00','2026-01-01','stock','OLD',1,'BUY','BUY','s1')"); c.commit(); c.close()
     s = Store(p)
     with s.conn() as c:
-        assert c.execute("PRAGMA user_version").fetchone()[0] == 2 and c.execute("SELECT ticker, primary_theme FROM signals_log").fetchone()["primary_theme"] is None
+        assert c.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION and c.execute("SELECT ticker, primary_theme FROM signals_log").fetchone()["primary_theme"] is None
         assert {"theme_gate", "theme_gate_log", "tuning_runs"} <= {r[0] for r in c.execute("select name from sqlite_master where type='table'")}
     Store(p)                                                                      # idempotent
 

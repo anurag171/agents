@@ -13,6 +13,7 @@
   <div class="brand"><span class="seal">VM</span><div><b>Vitta-Mantri</b><small>News impact decoder</small></div></div>
   <nav class="tabs" id="tabs" role="tablist" aria-label="Views">
     <button role="tab" data-tab="signals" aria-selected="true">Signals</button>
+    <button role="tab" data-tab="discovery" aria-selected="false">Discovery</button>
     <button role="tab" data-tab="market" aria-selected="false">Market</button>
     <button role="tab" data-tab="assets" aria-selected="false">Assets</button>
     <button role="tab" data-tab="ipos" aria-selected="false">IPOs</button>
@@ -30,6 +31,7 @@
 <div id="stale" class="banner" role="alert" hidden></div>
 <main id="main">
   <section class="kpis" id="kpis" aria-live="polite"></section>
+  <p id="uniWarn" class="banner" hidden></p>
   <p class="disclaimer">Educational impact map from public headlines — not investment advice. Signals can be wrong, late or already priced in.</p>
 
   <section id="v-signals" class="view">
@@ -42,6 +44,18 @@
     <div id="skel" class="list"><div class="row skel"></div><div class="row skel"></div><div class="row skel"></div></div>
     <div id="list" class="list"></div>
     <p id="emptyS" class="empty" hidden>No names match this view yet. Signals appear after the next scrape cycle.</p>
+  </section>
+
+  <section id="v-discovery" class="view" hidden>
+    <p class="big" id="discHead">Stocks worth a look, with or without headlines</p>
+    <p class="meta" id="discNote"></p>
+    <div id="discWarn"></div>
+    <h4 class="cap">Picks · strong fundamentals and price strength</h4>
+    <div class="feed" id="discPicks"></div>
+    <h4 class="cap">Watchlist · promising, but not passing every test</h4>
+    <div class="feed" id="discWatch"></div>
+    <p id="emptyD" class="empty" hidden>No stocks pass the screen yet. The first run needs live price history and, for picks, fundamentals.</p>
+    <ul class="meta" id="discNotes"></ul>
   </section>
 
   <section id="v-market" class="view" hidden>

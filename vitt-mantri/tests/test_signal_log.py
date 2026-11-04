@@ -2,7 +2,7 @@ import json, random
 from datetime import date, datetime, timedelta, timezone
 import pytest
 from engine import signal_log as L
-from engine.store import Store
+from engine.store import SCHEMA_VERSION, Store
 from engine.technicals import Bar
 
 T0 = datetime(2026, 10, 5, 12, 0, tzinfo=timezone.utc)        # a Monday
@@ -26,7 +26,7 @@ def count(st, sql="SELECT COUNT(*) c FROM signals_log"):
 def test_schema_is_wal_versioned_and_idempotent(tmp_path):
     p = str(tmp_path / "x.sqlite"); Store(p); s2 = Store(p)
     with s2.conn() as c:
-        assert c.execute("PRAGMA journal_mode").fetchone()[0] == "wal" and c.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert c.execute("PRAGMA journal_mode").fetchone()[0] == "wal" and c.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
 
 
 def test_a_call_is_logged_once_not_every_cycle(st):

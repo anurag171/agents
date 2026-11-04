@@ -333,6 +333,16 @@ ONE look at the test period, paired bootstrap over days must clear zero at 97.5%
 `config/scoring_weights.json`, bumps the scoring version (track record restarts) and needs a scheduler restart. Needs >=300 settled calls over >=60 days. Simulated: wrongly adopts on pure noise ~1 in 40,
 adopts strong real edges 30/30, weak edges ~1 in 5 (deliberately conservative). Run `report` rarely (monthly at most): every extra look at overlapping test data makes it less trustworthy.
 
+Discovery layer (`engine/screener.py`, `engine/fundamentals.py`, `/api/discovery`, Discovery tab): a NEWS-INDEPENDENT screen so quiet compounders are found without a headline.
+- Coverage: the universe grows from every symbol in the live NSE quote snapshot (Nifty 500 by default) as well as the index/listing CSVs; `python -m engine.instruments` diagnoses why the live list did not load; the UI warns when the stock list is the 113-name fallback.
+- Method: percentile ranks within sector peer groups (>=8 names, else whole universe) for quality (ROE, margin, leverage; leverage skipped for financials), growth, value, 6-12m momentum vs Nifty, stability; composite uses the same shrink-toward-50-by-coverage formula as the news score.
+  Hard filters: liquidity (>= INR 5 cr/day traded), >=126 bars, no loss-makers, PICK needs price above a rising 200-day average, >=60% data coverage, and a chart check (CONTRADICT -> watchlist, WAIT -> flagged "wait for pullback").
+  No fundamentals -> price-only WATCHLIST at best, never a PICK.
+- Fundamentals: files in `VM_FUNDAMENTALS_DIR` (Screener/Trendlyne-style CSV or JSON) > SQLite cache (7 days) > Yahoo quoteSummary filled progressively (`VM_FUND_BATCH`, default 120 per run, every `VM_SCREEN_FILL_EVERY_MIN`=30 until 90% filled, then every `VM_SCREEN_EVERY_H`=12).
+- Accountability: PICKs are logged as kind='screen' (version q1) and settled at 20 and 60 trading days (benchmark Nifty 50); `/api/performance?kind=screen`. Factor premia work over months, so expect a long wait for evidence.
+Unverified from the build sandbox: Yahoo crumb/quoteSummary flow and NSE `equity-stockIndices` (`meta.industry`) formats.
+
 Still open (do next, in this order): make track-record intervals cluster-aware (calls on the same day are correlated, so the hit-rate ranges are currently optimistic);
+tune the screen weights/thresholds only through the held-out protocol (engine/tuning.py handles news weights; extend it to `screener.W` once screen picks have settled);
 recency decay in `aggregate_board` (P4); honest-UA default and dropping dead/paywalled sources after a source-yield audit (P1); structured logging/metrics, Docker non-root image (P7).
 Unverified from the build sandbox (check on first run): NSE/Yahoo endpoint formats - failures show up as `error` in `/api/briefing` coverage.

@@ -40,11 +40,11 @@ def parse_yahoo_chart(text: str) -> Optional[dict]:
             "prev_close": prev, "change_pct": (price / prev - 1) * 100, "bars": bars}
 
 
-def fetch_bars(sym: str, session=None, rng: str = "1y") -> Optional[dict]:
+def fetch_bars(sym: str, session=None, rng: str = "1y", ttl: Optional[int] = None) -> Optional[dict]:
     key = (sym, rng)
     with _LOCK:
         hit = _CACHE.get(key)
-        if hit and time.time() - hit[0] < (TTL_S if hit[1] else FAIL_TTL_S):
+        if hit and time.time() - hit[0] < ((ttl or TTL_S) if hit[1] else FAIL_TTL_S):
             return hit[1]
     data = None
     try:
@@ -59,4 +59,8 @@ def fetch_bars(sym: str, session=None, rng: str = "1y") -> Optional[dict]:
         data = None
     with _LOCK:
         _CACHE[key] = (time.time(), data)
+        if len(_CACHE) > 1500:
+            cutoff = time.time() - 6 * 3600
+            for k in [k for k, v in _CACHE.items() if v[0] < cutoff]:
+                del _CACHE[k]
     return data

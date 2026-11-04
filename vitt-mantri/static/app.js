@@ -15,6 +15,7 @@ const store = {
 const DEMO = /[?&]demo=1/.test(location.search);
 const STALE_MIN = 10, GLYPH = { BUY: "▲", SELL: "▼", WATCH: "◆" };
 let DATA = {}, PREV = null, lastFocus = null;
+const DISC = { at: 0, data: null };
 const TRACK = { at: 0, h: 5, hz: 5, data: null, theme: null };
 const V = { tab: "signals", side: "ALL", region: "all", src: new Set(), direct: false, q: "", confirmed: false };
 
@@ -271,6 +272,46 @@ function renderIpos() {
   $("emptyI").hidden = items.length > 0;
 }
 
+/* ---------- discovery (news-independent screen) ---------- */
+const FACTORS = [["quality", "Quality"], ["growth", "Growth"], ["value", "Value"], ["momentum", "Momentum"], ["risk", "Stability"]];
+function fillDisc(n, r) {
+  n.className = "card";
+  const top = mk("div", "top2"), c = mk("span", "chip " + (r.tier === "PICK" ? "buy" : "watch"), r.tier === "PICK" ? "▲ PICK" : "◆ WATCHLIST");
+  c.append(mk("em", "", Math.round(num(r.score_pct)) + "%"));
+  top.append(c, mk("span", "", r.sector || ""), mk("span", "", `₹${num(r.price).toLocaleString()}`), mk("span", "", `data coverage ${num(r.coverage_pct)}%`));
+  const h = mk("h3", "", `${r.ticker} · ${r.name}`), why = mk("p", "", r.why);
+  const fb = mk("div", "fbars");
+  FACTORS.forEach(([k, lab]) => { const d = mk("div"), v = (r.factors || {})[k]; d.append(mk("span", "", lab), mk("b", "", v == null ? "–" : v + "%")); const b = mk("div", "sbar"); b.style.setProperty("--w", (v == null ? 0 : num(v)) + "%"); b.append(mk("i")); d.append(b); fb.append(d); });
+  const f = r.facts || {}, facts = mk("div", "facts");
+  [f.roe != null && `ROE ${num(f.roe).toFixed(0)}%`, f.debt_equity != null && `D/E ${num(f.debt_equity).toFixed(1)}`, f.rev_growth != null && `Revenue ${signedPct(f.rev_growth)}`, f.earn_growth != null && `Earnings ${signedPct(f.earn_growth)}`,
+    f.pe != null && `P/E ${num(f.pe).toFixed(0)}`, f.rel6_pct != null && `6m vs Nifty ${signedPct(f.rel6_pct)}`].filter(Boolean).forEach((t) => facts.append(mk("span", "", t)));
+  const fl = mk("div", "flags");
+  if (r.chart && r.chart.verdict) fl.append(mk("span", "vchip v-" + r.chart.verdict.toLowerCase(), "Chart: " + r.chart.verdict.toLowerCase()));
+  (r.flags || []).forEach((x) => fl.append(mk("span", "vchip " + (/loss|contradict|below|price-only/.test(x) ? "v-wait" : "v-note"), x)));
+  n.replaceChildren(top, h, why, fb, facts, fl);
+}
+const signedPct = (v) => `${num(v) >= 0 ? "+" : ""}${num(v).toFixed(0)}%`;
+function renderDiscoveryData(d) {
+  const u = (d && d.universe) || {}, picks = (d && d.picks) || [], watch = (d && d.watchlist) || [];
+  const warn = [];
+  if (DATA.universe && DATA.universe.origin === "seed") warn.push(`The stock list is the built-in ${num(DATA.universe.size)}-name fallback, so most listed companies are not being looked at. Run "python -m engine.instruments" on the server to see why the live NSE list did not load.`);
+  if (d && u.eligible && num(u.with_fundamentals) < 0.3 * num(u.eligible)) warn.push(`Fundamentals are loaded for only ${num(u.with_fundamentals)} of ${num(u.eligible)} stocks, so most results are price-only and cannot become Picks yet. The fill continues in the background; you can also provide a file (VM_FUNDAMENTALS_DIR).`);
+  $("discWarn").replaceChildren(...warn.map((w) => mk("p", "warnbox", w)));
+  const t = d && d.track && d.track.overall;
+  $("discNote").textContent = !d || d.pending ? "The first screen has not finished yet." : `Screened ${num(u.with_prices)} stocks (${num(u.eligible)} liquid enough) · fundamentals for ${num(u.with_fundamentals)} · updated ${ago(d.as_of)} · ` +
+    (t && t.enough ? `past picks went up ${Math.round(num(t.hit_rate) * 100)}% of the time over ${d.track.horizon} days (n=${t.n}).` : `track record of picks: not enough history yet (${t ? num(t.n) : 0} of 30 settled).`);
+  sync($("discPicks"), picks, (r) => r.ticker, () => mk("article"), fillDisc);
+  sync($("discWatch"), watch, (r) => r.ticker, () => mk("article"), fillDisc);
+  $("emptyD").hidden = picks.length + watch.length > 0 || !!(d && d.pending);
+  $("discNotes").replaceChildren(...((d && d.notes) || []).map((x) => mk("li", "", x)));
+}
+function renderDiscovery() {
+  if (DISC.data && Date.now() - DISC.at < 30000) return renderDiscoveryData(DISC.data);
+  renderDiscoveryData(DATA.discovery || DISC.data);
+  (DEMO ? Promise.resolve(DATA.discovery) : fetch("/api/discovery").then((r) => (r.ok ? r.json() : null)).catch(() => null))
+    .then((d) => { if (!d) return; DISC.data = d; DISC.at = Date.now(); if (V.tab === "discovery") renderDiscoveryData(d); });
+}
+
 /* ---------- track record ---------- */
 const pc = (v, d = 0) => (v == null ? "–" : (num(v) * 100).toFixed(d) + "%");
 const sg = (v) => (v == null ? "–" : `${num(v) >= 0 ? "+" : ""}${num(v).toFixed(2)}%`);
@@ -336,6 +377,9 @@ function renderTrack() {
 
 /* ---------- kpis, sources, status ---------- */
 function renderKpis() {
+  const uw = $("uniWarn"), un = DATA.universe;
+  uw.hidden = !(un && un.origin === "seed");
+  if (!uw.hidden) uw.textContent = `Only ${num(un.size)} stocks are being tracked (built-in fallback list). The live NSE stock list has not loaded, so most listed companies are never checked. See the Discovery tab for how to fix it.`;
   const c = { BUY: 0, SELL: 0, WATCH: 0 };
   (DATA.board || []).forEach((r) => { if (c[r.action] != null) c[r.action]++; });
   const cov = DATA.coverage || [], live = cov.filter((x) => num(x.raw) > 0).length, dec = num(DATA.count, (DATA.news || []).length);
@@ -363,7 +407,7 @@ function tick() {
   if (stale) b.textContent = `Data is stale — last update ${ago(u)}. Signals may no longer reflect the market.`;
   if (u && $("live").classList.contains("on")) $("liveText").textContent = "live · " + ago(u);
 }
-function renderAll() { renderKpis(); renderSignals(); if (V.tab === "market") renderMarket(); if (V.tab === "assets") renderAssets(); if (V.tab === "ipos") renderIpos(); if (V.tab === "track") renderTrack(); if (V.tab === "tape") renderTape(); if (V.tab === "sources") renderSources(); }
+function renderAll() { renderKpis(); renderSignals(); if (V.tab === "discovery") renderDiscovery(); if (V.tab === "market") renderMarket(); if (V.tab === "assets") renderAssets(); if (V.tab === "ipos") renderIpos(); if (V.tab === "track") renderTrack(); if (V.tab === "tape") renderTape(); if (V.tab === "sources") renderSources(); }
 function ingest(snap) {
   if (!snap) return;
   DATA = snap; $("skel").hidden = true; renderAll(); tick();
@@ -371,7 +415,7 @@ function ingest(snap) {
 function setTab(t) {
   V.tab = t;
   document.querySelectorAll("#tabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === t)));
-  ["signals", "market", "assets", "ipos", "track", "tape", "sources"].forEach((v) => ($("v-" + v).hidden = v !== t));
+  ["signals", "discovery", "market", "assets", "ipos", "track", "tape", "sources"].forEach((v) => ($("v-" + v).hidden = v !== t));
   renderAll();
 }
 
@@ -432,7 +476,7 @@ document.addEventListener("keydown", (e) => {
   const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
   if (e.key === "Escape") closeDrawer();
   else if ((e.key === "/" && !typing) || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k")) { e.preventDefault(); openPal(); }
-  else if (!typing && ["1", "2", "3", "4", "5", "6", "7"].includes(e.key)) setTab(["signals", "market", "assets", "ipos", "track", "tape", "sources"][+e.key - 1]);
+  else if (!typing && ["1", "2", "3", "4", "5", "6", "7", "8"].includes(e.key)) setTab(["signals", "discovery", "market", "assets", "ipos", "track", "tape", "sources"][+e.key - 1]);
 });
 
 /* ---------- demo data (index.html?demo=1) ---------- */
@@ -471,7 +515,14 @@ function demoData() {
     headlines: ["Brent crude jumps 4% as Hormuz tensions flare", "RBI holds repo rate, keeps stance neutral"], direct_buy: action === "BUY" ? 2 : 0, direct_sell: action === "SELL" ? 2 : 0, indirect_buy: 0, indirect_sell: 0, ...(x.score_pct === undefined && conviction > 1 ? bd(conviction) : {}), ...x });
   const ch = (verdict, score, rr) => ({ verdict, score, rr, entry_zone: [412.5, 428.0], stop: 401.2, target: 462.0, reasons: ["trend up (+0.35)", "momentum RSI 58 / MACD (+0.25)", "history: 61% hit over 10d in 34 analogs (+0.22)"] });
   const tk = (t) => ({ ticker: t });
-  return { count: 42, cycle: 7, updated_at: now, ai_ready: true, interpreter: "rules+ai",
+  const dpick = (ticker, name, tier, score, cov, why, flags, f, x = {}) => ({ ticker, name, sector: "capital goods", tier, score_pct: score, coverage_pct: cov, price: 1240.5, why, flags, no_news: true, price_only: cov < 60,
+    factors: { quality: 92, growth: 88, value: 61, momentum: 84, risk: 70 }, facts: f, chart: { verdict: "CONFIRM" }, ...x });
+  const discovery = { as_of: now, version: "q1", universe: { requested: 500, with_prices: 487, eligible: 412, with_fundamentals: 301 }, track: { horizon: 20, overall: { n: 12, enough: false } },
+    picks: [dpick("KPITTECH", "KPIT Technologies", "PICK", 84, 100, "Strong returns on equity (31%), low debt (D/E 0.1), growing fast (+38%), beating the Nifty by +22% over 6 months; barely in the headlines.", ["no headlines in the current news window", "at 52-week high"], { roe: 31, debt_equity: 0.1, rev_growth: 38, earn_growth: 44, pe: 41, rel6_pct: 22 }),
+      dpick("GRAVITA", "Gravita India", "PICK", 77, 100, "Growing fast (+29%), beating the Nifty by +15% over 6 months; barely in the headlines.", ["no headlines in the current news window", "extended: wait for a pullback (zone 1110-1180)"], { roe: 24, debt_equity: 0.3, rev_growth: 29, pe: 33, rel6_pct: 15 }, { chart: { verdict: "WAIT" } })],
+    watchlist: [dpick("MOMOCO", "Momentum Co", "WATCHLIST", 66, 40, "Beating the Nifty by +31% over 6 months; barely in the headlines.", ["price-only: fundamentals not available", "no headlines in the current news window"], { rel6_pct: 31 }, { price_only: true, factors: { quality: null, growth: null, value: null, momentum: 90, risk: 52 } })],
+    notes: ["A screen finds candidates by quality, growth, value and momentum. These factors work over months, not days, and go through long bad stretches.", "It is not a prediction. Picks are logged and checked against what the stocks did next; see the track line above."] };
+  return { count: 42, cycle: 7, updated_at: now, ai_ready: true, interpreter: "rules+ai", discovery, universe: { origin: "seed", size: 113 },
     movers: { gainers: [{ symbol: "ONGC", name: "Oil & Natural Gas Corp", mkt: "IN", price: 268.4, change_pct: 3.6 }, { symbol: "ZOMATO", name: "Zomato Ltd", mkt: "IN", price: 255.1, change_pct: 5.2 }],
         losers: [{ symbol: "INDIGO", name: "InterGlobe Aviation", mkt: "IN", price: 4310, change_pct: -2.8 }], active: [{ symbol: "NVDA", name: "NVIDIA", mkt: "US", price: 905.2, change_pct: 2.1 }] },
       assets: [

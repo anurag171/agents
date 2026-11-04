@@ -40,6 +40,7 @@ class Quote:
     year_high: Optional[float] = None
     year_low: Optional[float] = None
     source: str = ""
+    industry: str = ""
 
 
 def _f(v, d=None):
@@ -59,7 +60,7 @@ def parse_nse_snapshot(text: str) -> list[Quote]:
         if p > 0:
             out.append(Quote(sym.upper(), (r.get("meta") or {}).get("companyName", sym), "IN", p, _f(r.get("pChange"), 0.0),
                              _f(r.get("totalTradedVolume"), 0.0), _f(r.get("totalTradedValue"), 0.0), None,
-                             _f(r.get("yearHigh")), _f(r.get("yearLow")), "NSE"))
+                             _f(r.get("yearHigh")), _f(r.get("yearLow")), "NSE", industry=str((r.get("meta") or {}).get("industry") or "")))
     return out
 
 

@@ -111,7 +111,7 @@ class Universe:
                 i.industry = i.industry or cur.industry; i.tags = list(set(i.tags) | set(cur.tags))
             self.by_symbol[i.symbol] = i
             self.meta["sources"][i.source] = self.meta["sources"].get(i.source, 0) + 1
-        self._rx = None
+        self._rx, self._sym_rx, self._alias_map = None, None, {}          # force the matcher to rebuild (was stale after add())
         for i in self.by_symbol.values():
             tags = set(i.tags) | set(self.overrides.get(i.symbol, [])) | set(INDUSTRY_TAGS.get(i.industry.lower(), []))
             i.tags = sorted(tags)
@@ -171,6 +171,22 @@ class Universe:
         u = cls([Instrument(**i) for i in d["instruments"]], overrides)
         u.meta["loaded_at"] = d.get("saved_at", 0)
         return u
+
+
+def grow_universe(universe, quotes) -> int:
+    """Every NSE symbol seen in the live quote snapshot becomes an instrument, so coverage no longer depends on the index CSVs loading."""
+    new = [Instrument(q.symbol, q.name or q.symbol, mkt=q.mkt, industry=getattr(q, "industry", ""), tier=3, source="quotes")
+           for q in quotes if q.mkt == "IN" and not universe.has(q.symbol)]
+    if new:
+        universe.add(new)
+    return len(new)
+
+
+def http_text(url):
+    import requests
+    r = requests.get(url, headers={"User-Agent": "Mozilla/5.0 (compatible; VittaMantri/2.0; research)", "Accept": "text/csv,application/json,*/*"}, timeout=(3.05, 20))
+    r.raise_for_status()
+    return r.text
 
 
 # ---- loading / refresh --------------------------------------------------------
@@ -252,3 +268,16 @@ def get_universe(get=None, force=False) -> Universe:
         u.meta["last_attempt"] = attempt
         _U = u
         return u
+
+
+if __name__ == "__main__":
+    # python -m engine.instruments   -> tries every universe source from THIS machine and tells you what worked
+    errors = {}
+    try:
+        got = fetch_sources(http_text, os.getenv("VM_UNIVERSE_DIR"))
+        u = get_universe(get=http_text, force=True)
+        print(f"loaded {len(got)} instruments from live sources -> universe size {len(u)} (origin: {u.meta.get('origin')})")
+    except Exception as exc:
+        print(f"LIVE LOAD FAILED: {exc}")
+        print("Fix: allow nsearchives.nseindia.com / www.sec.gov through the proxy, or download the CSVs on another machine and put them in VM_UNIVERSE_DIR "
+              "(ind_nifty500list.csv, EQUITY_L.csv, company_tickers.json).")

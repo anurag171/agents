@@ -8,7 +8,7 @@ import os
 import sqlite3
 from contextlib import contextmanager
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 DDL = """
 CREATE TABLE IF NOT EXISTS signals_log(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -45,6 +45,9 @@ CREATE TABLE IF NOT EXISTS theme_gate_log(
 CREATE TABLE IF NOT EXISTS tuning_runs(
   id INTEGER PRIMARY KEY AUTOINCREMENT, run_at TEXT NOT NULL, horizon INTEGER, n_rows INTEGER, train_range TEXT, val_range TEXT, test_range TEXT,
   test_start TEXT, test_end TEXT, base_json TEXT, cand_json TEXT, metrics_json TEXT, decision TEXT, test_look INTEGER, adopted INTEGER DEFAULT 0);
+""",
+    3: """
+CREATE TABLE IF NOT EXISTS fundamentals(symbol TEXT PRIMARY KEY, source TEXT, fetched_at TEXT NOT NULL, json TEXT NOT NULL);
 """,
 }
 
