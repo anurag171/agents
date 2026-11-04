@@ -315,18 +315,18 @@ function renderDiscovery() {
 /* ---------- track record ---------- */
 const pc = (v, d = 0) => (v == null ? "–" : (num(v) * 100).toFixed(d) + "%");
 const sg = (v) => (v == null ? "–" : `${num(v) >= 0 ? "+" : ""}${num(v).toFixed(2)}%`);
-function statRow(label, st, minN) {
+function statRow(label, st, minN, minDays) {
   const tr = mk("tr", st && st.n && !st.enough ? "dim" : ""), n = st ? num(st.n) : 0;
   const hit = mk("td"); if (n) { hit.append(mk("b", "", pc(st.hit_rate)), mk("small", "", ` (${pc(st.hit_ci[0])}–${pc(st.hit_ci[1])})`)); const b = mk("div", "sbar"); b.style.setProperty("--w", num(st.hit_rate) * 100 + "%"); b.append(mk("i")); hit.append(b); } else hit.textContent = "–";
-  tr.append(mk("td", "", label), mk("td", "", n ? (st.enough ? String(n) : `${n} (need ${minN})`) : "0"), hit, mk("td", "", n && st.excess_hit_rate != null ? pc(st.excess_hit_rate) : "–"), mk("td", "", n ? sg(st.mean_ret) : "–"), mk("td", "", n && st.mean_excess != null ? sg(st.mean_excess) : "–"));
+  tr.append(mk("td", "", label), mk("td", "", n ? (st.enough ? `${n} calls · ${num(st.n_days)} days` : `${n} calls, ${num(st.n_days)} days (need ${minN} over ${minDays})`) : "0"), hit, mk("td", "", n && st.excess_hit_rate != null ? pc(st.excess_hit_rate) : "–"), mk("td", "", n ? sg(st.mean_ret) : "–"), mk("td", "", n && st.mean_excess != null ? sg(st.mean_excess) : "–"));
   return tr;
 }
-function statTable(title, groups, minN) {
+function statTable(title, groups, minN, minDays) {
   const wrap = mk("div"); wrap.append(mk("h4", "cap", title));
   const t = mk("table", "tbl"), hd = mk("thead"), hr = mk("tr");
-  ["Group", "Calls", "Went the called way (95% range)", "Beat the index", "Avg return", "Avg vs index"].forEach((h) => hr.append(mk("th", "", h)));
+  ["Group", "Calls (separate days)", "Went the called way (95% range)", "Beat the index", "Avg return", "Avg vs index"].forEach((h) => hr.append(mk("th", "", h)));
   hd.append(hr); const tb = mk("tbody");
-  Object.entries(groups).forEach(([k, st]) => tb.append(statRow(k, st, minN))); t.append(hd, tb); wrap.append(t); return wrap;
+  Object.entries(groups).forEach(([k, st]) => tb.append(statRow(k, st, minN, minDays))); t.append(hd, tb); wrap.append(t); return wrap;
 }
 const SCLS = { proven: "v-confirm", unproven: "v-neutral", building: "v-unavailable", poor: "v-contradict" };
 function themeSection(th) {
@@ -351,16 +351,18 @@ function renderTrackData(d, th) {
   const o = d.overall || { n: 0 }, parts = [];
   $("trackNote").textContent = `${d.logged} calls logged · ${d.settled} settled at ${d.horizon} days · ${d.pending} still waiting`;
   if (!o.n) parts.push(mk("p", "big", "No settled calls yet."), mk("p", "meta", "Every call is logged when it is made and checked against the price 1, 5 and 20 trading days later. The first results appear after the first horizon passes; a percentage is only shown once 30 calls have settled."));
+  else if (!o.enough) parts.push(mk("p", "big", "Not enough history yet to quote a hit rate."), mk("p", "meta", `${o.n} calls settled on ${num(o.n_days)} separate days; a percentage needs ${d.min_n} calls over at least ${d.min_days} separate days, because calls made on the same day move together and count as little more than one data point.`));
   else {
-    parts.push(mk("p", "big", `Of ${o.n} settled calls, ${pc(o.hit_rate)} went the called way over ${d.horizon} trading days (95% range ${pc(o.hit_ci[0])}–${pc(o.hit_ci[1])}).`));
+    parts.push(mk("p", "big", `Of ${o.n} settled calls on ${num(o.n_days)} separate days, ${pc(o.hit_rate)} went the called way over ${d.horizon} trading days (95% range ${pc(o.hit_ci[0])}–${pc(o.hit_ci[1])}).`));
+    if (num(o.design_effect) > 1.2) parts.push(mk("p", "meta", `Calls on the same day move together, so these ${o.n} calls carry about as much evidence as ${Math.round(num(o.n_eff))} independent ones. The range above is widened to account for that (resampling whole days); a simple formula would show ${pc(o.hit_ci_naive[0])}–${pc(o.hit_ci_naive[1])}.`));
     if (d.benchmark_up_rate != null) parts.push(mk("p", "meta", `For context, the index itself rose in ${pc(d.benchmark_up_rate)} of those windows, so a high hit rate in a rising market is partly luck. Compare the “beat the index” column.`));
     parts.push(mk("p", "", d.predictive.verdict));
   }
   const buckets = {}; Object.entries(d.by_bucket || {}).forEach(([k, v]) => { if (v.n) buckets[k] = v; });
-  if (Object.keys(buckets).length) parts.push(statTable("By signal strength — does a higher % really do better?", buckets, d.min_n));
-  if (Object.keys(d.by_chart || {}).length) parts.push(statTable("By chart check — does it help?", d.by_chart, d.min_n));
+  if (Object.keys(buckets).length) parts.push(statTable("By signal strength — does a higher % really do better?", buckets, d.min_n, d.min_days));
+  if (Object.keys(d.by_chart || {}).length) parts.push(statTable("By chart check — does it help?", d.by_chart, d.min_n, d.min_days));
   const shown = {}; Object.entries(d.by_shown || {}).forEach(([k, v]) => { if (v.n) shown[k] = v; });
-  if (Object.keys(shown).length) parts.push(statTable("Calls shown vs calls held back — do the filters help?", shown, d.min_n));
+  if (Object.keys(shown).length) parts.push(statTable("Calls shown vs calls held back — do the filters help?", shown, d.min_n, d.min_days));
   parts.push(themeSection(th));
   const ul = mk("ul", "meta"); (d.notes || []).forEach((x) => ul.append(mk("li", "", x))); parts.push(ul);
   $("trackBody").replaceChildren(...parts);
@@ -497,12 +499,12 @@ function demoTheme() {
     log: [{ at: "2026-10-02T09:00:00", theme_id: "rbi_pause", kind: "stock", old_status: "unproven", new_status: "poor", reason: "upper 99% bound -0.30% <= 0 over 41 independent observations: clearly not beating the benchmark" }] };
 }
 function demoPerf(h) {
-  const st = (n, hit, ret, ex) => ({ n, enough: n >= 30, hit_rate: hit, hit_ci: [Math.max(0, hit - 0.1), Math.min(1, hit + 0.1)], mean_ret: ret, median_ret: ret, excess_hit_rate: hit - 0.04, mean_excess: ex, n_excess: n });
-  return { horizon: h, min_n: 30, logged: 214, settled: 196, pending: 18, overall: st(196, 0.58, 0.9, 0.4), benchmark_up_rate: 0.54,
+  const st = (n, hit, ret, ex, days = Math.round(n / 1.5)) => ({ n, n_days: days, enough: n >= 30 && days >= 20, hit_rate: hit, hit_ci: [Math.max(0, hit - 0.13), Math.min(1, hit + 0.13)], hit_ci_naive: [Math.max(0, hit - 0.07), Math.min(1, hit + 0.07)], design_effect: 2.3, n_eff: Math.round(n / 2.3), mean_ret: ret, median_ret: ret, excess_hit_rate: hit - 0.04, mean_excess: ex, n_excess: n });
+  return { horizon: h, min_n: 30, min_days: 20, logged: 214, settled: 196, pending: 18, overall: st(196, 0.58, 0.9, 0.4, 130), benchmark_up_rate: 0.54,
     by_bucket: { "0-39%": { n: 0 }, "40-49%": st(22, 0.45, -0.3, -0.5), "50-59%": st(41, 0.51, 0.1, -0.1), "60-69%": st(48, 0.56, 0.6, 0.2), "70-79%": st(44, 0.61, 1.1, 0.6), "80-89%": st(34, 0.65, 1.6, 0.9), "90-100%": st(7, 0.71, 2.0, 1.1) },
     by_chart: { CONFIRM: st(70, 0.64, 1.4, 0.8), NEUTRAL: st(80, 0.55, 0.6, 0.2), WAIT: st(26, 0.5, 0.1, -0.2), CONTRADICT: st(20, 0.4, -0.8, -1.0) },
     by_shown: { "shown as BUY/SELL": st(118, 0.62, 1.2, 0.6), "held back to WATCH": st(78, 0.5, 0.2, -0.1) },
-    predictive: { n: 196, ic: 0.18, p_value: 0.011, predictive: true, verdict: "Higher strength has gone with better outcomes so far (rank correlation +0.18, p=0.011, n=196)." },
+    predictive: { n: 196, n_days: 118, ic: 0.18, p_value: 0.011, predictive: true, verdict: "Within the same day, higher-strength calls have done better than lower-strength ones (rank correlation +0.18, p=0.011, 196 calls on 118 days)." },
     notes: ["Demo data - not real results.", "'Right' = price moved in the called direction; returns exclude costs, slippage and taxes."] };
 }
 function demoData() {
@@ -536,7 +538,7 @@ function demoData() {
           factors: { listing: [{ factor: "demand", points: 12, why: "subscribed 12.5x overall" }], longterm: [{ factor: "valuation", points: 18, why: "P/E 18 vs peers 25" }] }, disclaimer: "Educational summary, not advice." },
         { name: "Zed Tech", status: "upcoming", verdict: "INSUFFICIENT DATA", listing_score: 50, longterm_score: 50, coverage: 0.1, sources: ["news"], price_band: [50, 52], terms: {}, subscription: {}, flags: [], factors: { listing: [], longterm: [] } }],
       coverage: [{ source: "Market: NSE", raw: 497 }, { source: "Economic Times", raw: 18 }, { source: "Moneycontrol", raw: 12 }, { source: "Reuters", raw: 9 }, { source: "Bloomberg", raw: 0 }],
-    board: [row("ONGC", "BUY", 3.4, 4, "Higher crude lifts upstream realisations.", { history: { enough: true, n: 34, hit_rate: 0.65, text: "Calls at this strength went the called way 65% of the time over 5 trading days (n=34, 95% range 48%-79%); average +1.6%." }, chart: ch("CONFIRM", 0.62, 2.1), market: { price: 268.4, change_pct: 3.6, mkt: "IN", flags: [] } }),
+    board: [row("ONGC", "BUY", 3.4, 4, "Higher crude lifts upstream realisations.", { history: { enough: true, n: 34, n_days: 23, hit_rate: 0.65, text: "Calls at this strength went the called way 65% of the time over 5 trading days (n=34 calls on 23 days, 95% range 46%-81%); average +1.6%." }, chart: ch("CONFIRM", 0.62, 2.1), market: { price: 268.4, change_pct: 3.6, mkt: "IN", flags: [] } }),
       row("ZOMATO", "WATCH", 0, 1, "Top gainer: +5.2% — no mapped news explains the move yet.", { origin: "market-mover", score_pct: null, strength: "No news signal", market: { price: 255.1, change_pct: 5.2, mkt: "IN", flags: ["volume 2.4x avg"] } }),
       row("INDIGO", "SELL", -2.9, 4, "Jet fuel costs rise with crude; margins squeezed.", { chart: ch("CONTRADICT", -0.31, 1.1), news_action: "SELL" }),
       row("RELIANCE", "WATCH", 1.1, 2, "Refining gains offset by retail softness.", { news_action: "BUY", chart: ch("WAIT", 0.18, 1.2), demoted_theme: true }),

@@ -342,7 +342,12 @@ Discovery layer (`engine/screener.py`, `engine/fundamentals.py`, `/api/discovery
 - Accountability: PICKs are logged as kind='screen' (version q1) and settled at 20 and 60 trading days (benchmark Nifty 50); `/api/performance?kind=screen`. Factor premia work over months, so expect a long wait for evidence.
 Unverified from the build sandbox: Yahoo crumb/quoteSummary flow and NSE `equity-stockIndices` (`meta.industry`) formats.
 
-Still open (do next, in this order): make track-record intervals cluster-aware (calls on the same day are correlated, so the hit-rate ranges are currently optimistic);
-tune the screen weights/thresholds only through the held-out protocol (engine/tuning.py handles news weights; extend it to `screener.W` once screen picks have settled);
+Cluster-aware track record (`engine/signal_log.py`): calls made on the same day move together (one Brent headline -> six calls; a risk-off day sinks every BUY), so
+- hit-rate / return ranges come from a bootstrap that resamples whole DAYS; measured on simulated data with a known 55% hit rate, the old "95%" range contained it only ~76-78% of the time under a day effect, the new one ~95% (and widens only when there is a day effect);
+- a percentage is shown only after `VM_MIN_N`=30 calls over at least `VM_MIN_DAYS`=20 separate days; stats expose `n_days`, `design_effect`, `n_eff`, `hit_ci_naive` for transparency;
+- "does strength predict outcomes" compares calls WITHIN each day (ranks and permutations inside days), so a bullish day full of strong calls cannot pass for skill;
+- `performance()` is memoised on (outcomes settled, calls logged) so the 90 s cycle stays cheap (~2 s once per change at 3,000 calls).
+
+Still open (do next, in this order): extend the held-out protocol (engine/tuning.py) to the screen weights/thresholds (`screener.W`, PICK_MIN) once screen picks have settled;
 recency decay in `aggregate_board` (P4); honest-UA default and dropping dead/paywalled sources after a source-yield audit (P1); structured logging/metrics, Docker non-root image (P7).
 Unverified from the build sandbox (check on first run): NSE/Yahoo endpoint formats - failures show up as `error` in `/api/briefing` coverage.

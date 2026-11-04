@@ -185,6 +185,6 @@ def test_discovery_endpoints(tmp_path, monkeypatch):
     c = app.app.test_client()
     assert c.get("/api/discovery").get_json()["pending"] is True
     snapfile.write(app.DISC_PATH, {"as_of": "2026-10-05T00:00:00+00:00", "version": "q1", "picks": [{"ticker": "GEM"}], "watchlist": [], "notes": [], "universe": {}})
-    j = c.get("/api/discovery").get_json(); assert j["picks"][0]["ticker"] == "GEM" and j["track"]["overall"] == {"n": 0, "enough": False}
+    j = c.get("/api/discovery").get_json(); assert j["picks"][0]["ticker"] == "GEM" and j["track"]["overall"] == {"n": 0, "n_days": 0, "enough": False}
     assert c.get("/api/performance?kind=screen&horizon=60").get_json()["horizon"] == 60
     snapfile.write(app.SNAP_PATH, {"cycle": 1, "updated_at": "x", "board": [], "news": []}); assert c.get("/api/briefing").get_json()["discovery"]["picks"][0]["ticker"] == "GEM"

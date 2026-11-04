@@ -13,6 +13,7 @@ HOW IT IS REPORTED  per strength bucket: n, hit rate with a Wilson 95% interval,
   formula never mixes with old calls."""
 from __future__ import annotations
 
+import copy
 import json
 import math
 import os
@@ -26,6 +27,8 @@ from .store import Store
 
 HORIZONS, HEADLINE_H = (1, 5, 20, 60), 5
 MIN_N, MIN_REENTRY_DAYS, SPLIT_GUARD = 30, 5, 0.30
+MIN_DAYS = int(os.getenv("VM_MIN_DAYS", "20"))      # separate emission days needed before a % is shown: 30 calls on 3 days is 3 data points, not 30
+BOOT_ITERS = 600
 EDGES = [(0, "0-39%"), (40, "40-49%"), (50, "50-59%"), (60, "60-69%"), (70, "70-79%"), (80, "80-89%"), (90, "90-100%")]
 BENCH = {"IN": "^NSEI", "US": "^GSPC"}
 
@@ -189,15 +192,56 @@ def wilson(k: int, n: int, z: float = 1.96):
     return [round((c - m) / d, 4), round((c + m) / d, 4)]
 
 
+def _day_key(r, i):
+    return r.get("emitted_date") or f"row{i}"
+
+
+def cluster_bootstrap(rows: list, iters: int = BOOT_ITERS, seed: int = 11, conf: float = 0.95):
+    """Resample whole DAYS with replacement. Calls made on the same day share the market's mood (one Brent headline -> six calls;
+    a risk-off day sinks every BUY), so they are not independent: a simple formula sees 8 calls where there is closer to 1 data point.
+    Returns None with fewer than 5 days (a bootstrap over so few clusters would itself be unreliable)."""
+    by = {}
+    for i, r in enumerate(rows):
+        c = by.setdefault(_day_key(r, i), [0, 0, 0.0, 0, 0.0])
+        y = r["signed_ret_pct"]; c[0] += 1; c[1] += y > 0; c[2] += y
+        e = r.get("signed_excess_pct")
+        if e is not None:
+            c[3] += 1; c[4] += e
+    cl = list(by.values()); k = len(cl)
+    if k < 5:
+        return None
+    rnd, hr, mr, me = random.Random(seed), [], [], []
+    for _ in range(iters):
+        pick = rnd.choices(cl, k=k)
+        n = sum(c[0] for c in pick); hr.append(sum(c[1] for c in pick) / n); mr.append(sum(c[2] for c in pick) / n)
+        en = sum(c[3] for c in pick)
+        if en:
+            me.append(sum(c[4] for c in pick) / en)
+    a = (1 - conf) / 2
+    q = lambda xs, nd: [round(sorted(xs)[int(a * len(xs))], nd), round(sorted(xs)[min(len(xs) - 1, int((1 - a) * len(xs)))], nd)]
+    return {"days": k, "hit": q(hr, 4), "hit_se": statistics.pstdev(hr), "ret": q(mr, 3), "excess": q(me, 3) if len(me) >= 0.9 * iters else None}
+
+
 def stats(rows: list) -> dict:
     n = len(rows)
     if not n:
-        return {"n": 0, "enough": False}
+        return {"n": 0, "n_days": 0, "enough": False}
     sr = [r["signed_ret_pct"] for r in rows]; hits = sum(1 for x in sr if x > 0)
-    ex = [r["signed_excess_pct"] for r in rows if r["signed_excess_pct"] is not None]
-    out = {"n": n, "enough": n >= MIN_N, "hit_rate": round(hits / n, 4), "hit_ci": wilson(hits, n), "mean_ret": round(statistics.fmean(sr), 3), "median_ret": round(statistics.median(sr), 3)}
+    ex = [r["signed_excess_pct"] for r in rows if r.get("signed_excess_pct") is not None]
+    boot = cluster_bootstrap(rows)
+    days = boot["days"] if boot else len({_day_key(r, i) for i, r in enumerate(rows)})
+    naive = wilson(hits, n)
+    out = {"n": n, "n_days": days, "enough": n >= MIN_N and days >= MIN_DAYS, "hit_rate": round(hits / n, 4),
+           "hit_ci": boot["hit"] if boot else naive, "hit_ci_naive": naive, "ci_method": "bootstrap over days" if boot else "simple (too few days to cluster)",
+           "mean_ret": round(statistics.fmean(sr), 3), "median_ret": round(statistics.median(sr), 3)}
+    if boot:
+        p = hits / n; se_srs = math.sqrt(p * (1 - p) / n) if 0 < p < 1 else 0.0
+        deff = max(1.0, (boot["hit_se"] / se_srs) ** 2) if se_srs > 0 else 1.0
+        out.update(design_effect=round(deff, 2), n_eff=round(n / deff, 1), ret_ci=boot["ret"])
     if ex:
         out.update(n_excess=len(ex), excess_hit_rate=round(sum(1 for x in ex if x > 0) / len(ex), 4), mean_excess=round(statistics.fmean(ex), 3))
+        if boot and boot["excess"]:
+            out["excess_ci"] = boot["excess"]
     return out
 
 
@@ -220,29 +264,60 @@ def spearman(x, y):
 
 
 def predictive_test(rows: list, shuffles: int = 2000, seed: int = 7) -> dict:
-    pts = [(r["score_pct"], r["signed_ret_pct"]) for r in rows if r["score_pct"] is not None]
-    n = len(pts)
-    if n < 50:
-        return {"n": n, "verdict": f"Too early to judge whether strength predicts outcomes (n={n}, need 50)."}
-    x, y = [p[0] for p in pts], [p[1] for p in pts]; ic = spearman(x, y); rnd, ge = random.Random(seed), 0
+    """Does a higher strength % rank calls better THAN OTHER CALLS MADE THE SAME DAY? Ranks are taken within each day and outcomes are
+    shuffled only within days. This removes market-wide effects (strong calls tend to cluster on bullish days, which would otherwise look
+    like skill) and respects that same-day calls are not independent. Uses excess return over the benchmark where available."""
+    by = {}
+    for i, r in enumerate(rows):
+        if r.get("score_pct") is None:
+            continue
+        y = r["signed_excess_pct"] if r.get("signed_excess_pct") is not None else r["signed_ret_pct"]
+        by.setdefault(_day_key(r, i), []).append((r["score_pct"], y))
+    days = []
+    for pts in by.values():
+        xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+        if len(pts) < 2 or len(set(xs)) < 2 or len(set(ys)) < 2:
+            continue
+        rx, ry = _ranks(xs), _ranks(ys); mx, my = statistics.fmean(rx), statistics.fmean(ry)
+        days.append(([a - mx for a in rx], [b - my for b in ry]))
+    n = sum(len(d[0]) for d in days)
+    if len(days) < MIN_DAYS or n < 50:
+        return {"n": n, "n_days": len(days), "verdict": f"Too early to judge whether higher strength ranks calls better (need 50 calls on at least {MIN_DAYS} days that each had several calls; have {n} calls on {len(days)} such days)."}
+    den = math.sqrt(sum(a * a for cx, _ in days for a in cx) * sum(b * b for _, cy in days for b in cy))
+    obs = sum(a * b for cx, cy in days for a, b in zip(cx, cy)) / den
+    rnd, ge = random.Random(seed), 0
     for _ in range(shuffles):
-        yy = y[:]; rnd.shuffle(yy); ge += spearman(x, yy) >= ic
+        tot = 0.0
+        for cx, cy in days:
+            sh = cy[:]; rnd.shuffle(sh); tot += sum(a * b for a, b in zip(cx, sh))
+        ge += tot / den >= obs
     p = (ge + 1) / (shuffles + 1)
-    good = ic > 0 and p < 0.05
-    return {"n": n, "ic": round(ic, 3), "p_value": round(p, 4), "predictive": good,
-            "verdict": (f"Higher strength has gone with better outcomes so far (rank correlation {ic:+.2f}, p={p:.3f}, n={n})." if good else
-                        f"Strength has NOT been shown to predict outcomes (rank correlation {ic:+.2f}, p={p:.2f}, n={n}).")}
+    good = obs > 0 and p < 0.05
+    return {"n": n, "n_days": len(days), "ic": round(obs, 3), "p_value": round(p, 4), "predictive": good,
+            "verdict": (f"Within the same day, higher-strength calls have done better than lower-strength ones (rank correlation {obs:+.2f}, p={p:.3f}, {n} calls on {len(days)} days)." if good else
+                        f"Strength has NOT been shown to rank calls better within a day (rank correlation {obs:+.2f}, p={p:.2f}, {n} calls on {len(days)} days).")}
+
+
+_PERF_MEMO = {}
 
 
 def performance(store: Store, horizon: int = HEADLINE_H, scoring_version: str = SCORING_VERSION, kind: str | None = None) -> dict:
+    kf = " AND s.kind=?" if kind else ""
+    args = (horizon, scoring_version) + ((kind,) if kind else ())
+    with store.conn() as c:                                   # cheap fingerprint: recompute (bootstraps are not free) only when outcomes change
+        sig = tuple(c.execute("SELECT COUNT(*) n, COALESCE(MAX(o.settled_at),'') m FROM signal_outcomes o JOIN signals_log s ON s.id=o.signal_id WHERE o.horizon=? AND s.scoring_version=?" + kf, args).fetchone()) + \
+              (c.execute("SELECT COUNT(*) n FROM signals_log WHERE scoring_version=?", (scoring_version,)).fetchone()["n"],)
+    memo = _PERF_MEMO.get((store.path, horizon, scoring_version, kind))
+    if memo and memo[0] == sig:
+        return copy.deepcopy(memo[1])
     q = """SELECT s.*, o.signed_ret_pct, o.signed_excess_pct, o.bench_ret_pct FROM signals_log s JOIN signal_outcomes o ON o.signal_id=s.id
-           WHERE o.horizon=? AND s.scoring_version=?""" + (" AND s.kind=?" if kind else "")
+           WHERE o.horizon=? AND s.scoring_version=?""" + kf
     with store.conn() as c:
         rows = [dict(r) for r in c.execute(q, (horizon, scoring_version) + ((kind,) if kind else ())).fetchall()]
         total = c.execute("SELECT COUNT(*) n FROM signals_log WHERE scoring_version=?", (scoring_version,)).fetchone()["n"]
     group = lambda key: {k: stats([r for r in rows if key(r) == k]) for k in sorted({key(r) for r in rows if key(r) is not None})}
     bench_up = [r["bench_ret_pct"] > 0 for r in rows if r["bench_ret_pct"] is not None]
-    return {"horizon": horizon, "scoring_version": scoring_version, "min_n": MIN_N, "logged": total, "settled": len(rows), "pending": total - len(rows),
+    out = {"horizon": horizon, "scoring_version": scoring_version, "min_n": MIN_N, "min_days": MIN_DAYS, "logged": total, "settled": len(rows), "pending": total - len(rows),
             "overall": stats(rows), "benchmark_up_rate": round(sum(bench_up) / len(bench_up), 4) if bench_up else None,
             "by_bucket": {lab: stats([r for r in rows if r["score_pct"] is not None and bucket(r["score_pct"]) == lab]) for _, lab in EDGES},
             "by_chart": group(lambda r: r["chart_verdict"] or "NO CHART"),
@@ -251,17 +326,21 @@ def performance(store: Store, horizon: int = HEADLINE_H, scoring_version: str = 
             "predictive": predictive_test(rows),
             "notes": ["'Right' = price moved in the called direction over the horizon; returns exclude costs, slippage and taxes.",
                       "Calls are logged when the direction changes, not every cycle; each call is counted once.",
-                      "Small samples and one market regime can mislead; intervals are 95% Wilson."]}
+                      f"Calls made on the same day move together, so ranges come from resampling whole days (a simple formula would be too narrow), and a percentage is shown only after {MIN_N} calls over at least {MIN_DAYS} separate days.",
+                      "One market regime can still mislead: results from a single bullish or bearish stretch may not repeat."]}
+    _PERF_MEMO[(store.path, horizon, scoring_version, kind)] = (sig, copy.deepcopy(out))
+    return out
 
 
 def history_sentence(b: dict, horizon: int):
     if not b or not b.get("n"):
         return None
     if not b["enough"]:
-        return f"Not enough history yet ({b['n']} of {MIN_N} settled calls at this strength)."
+        return (f"Not enough history yet ({b['n']} of {MIN_N} settled calls at this strength)." if b["n"] < MIN_N else
+                f"Not enough history yet ({b['n']} calls, but only on {b.get('n_days', 0)} separate days; need {MIN_N} calls over {MIN_DAYS} days).")
     lo, hi = b["hit_ci"]
     return (f"Calls at this strength went the called way {b['hit_rate']:.0%} of the time over {horizon} trading days "
-            f"(n={b['n']}, 95% range {lo:.0%}-{hi:.0%}); average {b['mean_ret']:+.1f}%.")
+            f"(n={b['n']} calls on {b['n_days']} days, 95% range {lo:.0%}-{hi:.0%}); average {b['mean_ret']:+.1f}%.")
 
 
 def attach_history(rows: list, perf: dict, id_key: str = "score_pct") -> list:
@@ -270,7 +349,7 @@ def attach_history(rows: list, perf: dict, id_key: str = "score_pct") -> list:
         if p is None:
             continue
         b = perf["by_bucket"].get(bucket(p), {})
-        r["history"] = {"horizon": perf["horizon"], "bucket": bucket(p), "n": b.get("n", 0), "enough": bool(b.get("enough")), "needed": MIN_N,
+        r["history"] = {"horizon": perf["horizon"], "bucket": bucket(p), "n": b.get("n", 0), "n_days": b.get("n_days", 0), "enough": bool(b.get("enough")), "needed": MIN_N,
                         "hit_rate": b.get("hit_rate"), "hit_ci": b.get("hit_ci"), "mean_ret": b.get("mean_ret"), "text": history_sentence(b, perf["horizon"]) or f"No settled calls yet at this strength (need {MIN_N})."}
     return rows
 

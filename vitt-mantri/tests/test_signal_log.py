@@ -115,16 +115,20 @@ def test_wilson_and_buckets_and_small_samples_are_not_reported_as_facts():
     assert s["n"] == 12 and s["enough"] is False and L.history_sentence(s, 5).startswith("Not enough history")
 
 
-def seed(st, n, edge, seed_=3):
-    """n settled calls where higher strength => higher chance of being right (edge=0 => pure noise)."""
-    rnd = random.Random(seed_)
+def seed(st, n, edge, seed_=3, per_day=8):
+    """n settled calls, `per_day` per emission day, with a market mood shared by every call that day.
+    Higher strength => higher chance of being right *within the day* (edge=0 => pure noise)."""
+    rnd = random.Random(seed_); shock = 0.0
     with st.conn() as c:
         for i in range(n):
-            pct = rnd.randint(35, 98); p_right = 0.5 + edge * (pct - 65) / 100
+            if i % per_day == 0:
+                shock = rnd.gauss(0, 0.10)                                        # today's market mood, common to all calls
+            pct = rnd.randint(35, 98); p_right = min(0.95, max(0.05, 0.5 + shock + edge * (pct - 65) / 100))
             right = rnd.random() < p_right; ret = rnd.uniform(0.5, 4) if right else -rnd.uniform(0.5, 4)
+            day = (date(2026, 1, 1) + timedelta(days=i // per_day)).isoformat()
             cur = c.execute("INSERT INTO signals_log(emitted_at,emitted_date,kind,ticker,yahoo,mkt,direction,news_action,final_action,score_pct,chart_verdict,scoring_version) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
-                            (T0.isoformat(), f"2026-{1 + i // 28:02d}-{1 + i % 28:02d}", "stock", f"T{i}", f"T{i}.NS", "IN", 1, "BUY", "BUY" if pct >= 60 else "WATCH", pct, "CONFIRM" if i % 3 == 0 else "NEUTRAL", "s1"))
-            c.execute("INSERT INTO signal_outcomes(signal_id,horizon,signed_ret_pct,signed_excess_pct,bench_ret_pct) VALUES(?,?,?,?,?)", (cur.lastrowid, 5, ret, ret - 0.2, 0.3))
+                            (day + "T10:00:00+00:00", day, "stock", f"T{i}", f"T{i}.NS", "IN", 1, "BUY", "BUY" if pct >= 60 else "WATCH", pct, "CONFIRM" if i % 3 == 0 else "NEUTRAL", "s1"))
+            c.execute("INSERT INTO signal_outcomes(signal_id,horizon,signed_ret_pct,signed_excess_pct,bench_ret_pct,settled_at) VALUES(?,?,?,?,?,?)", (cur.lastrowid, 5, ret, ret - 0.2, 0.3, "2026-06-01T00:00:00"))
 
 
 def test_performance_detects_real_signal_and_refuses_to_see_noise(st, tmp_path):
@@ -172,3 +176,72 @@ def test_concurrent_writers_and_readers_never_lock_or_corrupt(st):
     ts = [threading.Thread(target=writer, args=(k,)) for k in range(3)] + [threading.Thread(target=reader) for _ in range(3)]
     [t.start() for t in ts]; [t.join() for t in ts]
     assert errors == [] and count(st) == 120
+
+
+
+# ------------------------------------------------------------------ calls on the same day are NOT independent
+def sim_rows(seed_, days=40, per_day=8, p=0.55, conc=2.0):
+    """Day-level hit probability ~ Beta(mean p): every call that day shares the market's mood (conc=None -> independent calls)."""
+    rnd, rows = random.Random(seed_), []
+    for d in range(days):
+        q = rnd.betavariate(p * conc, (1 - p) * conc) if conc else p
+        for _ in range(per_day):
+            rows.append({"emitted_date": (date(2026, 1, 1) + timedelta(days=d)).isoformat(), "signed_ret_pct": 1.0 if rnd.random() < q else -1.0, "signed_excess_pct": None})
+    return rows
+
+
+def test_range_widens_when_same_day_calls_move_together_and_not_otherwise():
+    dep, ind = L.stats(sim_rows(1, conc=1.5)), L.stats(sim_rows(1, conc=None))
+    w = lambda s, k: s[k][1] - s[k][0]
+    assert w(dep, "hit_ci") > 1.4 * w(dep, "hit_ci_naive") and dep["design_effect"] > 2 and dep["n_eff"] < dep["n"] / 2 and dep["ci_method"] == "bootstrap over days"
+    assert 0.8 < w(ind, "hit_ci") / w(ind, "hit_ci_naive") < 1.35 and ind["design_effect"] < 1.7                     # no day effect -> no penalty
+
+
+def test_the_95_percent_range_really_contains_the_truth_about_95_percent_of_the_time():
+    """The defect this fixes: with a day effect the old Wilson range held the true 55% only ~3 times in 4."""
+    n, cov_new, cov_old = 150, 0, 0
+    for k in range(n):
+        s = L.stats(sim_rows(1000 + k, conc=2.0))
+        cov_new += s["hit_ci"][0] <= 0.55 <= s["hit_ci"][1]; cov_old += s["hit_ci_naive"][0] <= 0.55 <= s["hit_ci_naive"][1]
+    assert cov_new / n >= 0.90 and cov_old / n <= 0.85 and cov_new > cov_old + 0.08
+
+
+def test_a_percentage_needs_separate_days_not_just_many_calls():
+    mk = lambda days, per: [{"emitted_date": f"2026-02-{d + 1:02d}", "signed_ret_pct": 1.0 if (d + j) % 3 else -1.0, "signed_excess_pct": None} for d in range(days) for j in range(per)]
+    few = L.stats(mk(3, 14)); assert few["n"] == 42 and few["n_days"] == 3 and few["enough"] is False
+    assert "only on 3 separate days" in L.history_sentence(few, 5)
+    assert L.stats(mk(19, 2))["enough"] is False                                                                          # 38 calls on 19 days: one day short
+    ok = L.stats(mk(20, 2)); assert ok["enough"] and "n=40 calls on 20 days" in L.history_sentence(ok, 5)
+    legacy = L.stats([{"signed_ret_pct": 1.0, "signed_excess_pct": None}] * 12); assert legacy["n_days"] == 12 and legacy["enough"] is False   # rows without dates: each is its own day
+
+
+def conf_rows(seed_, within_slope=0.0, days=60, per_day=8):
+    """Market-wide confound: on bullish days EVERY call is strong and does well; on bearish days every call is weak and does badly.
+    Within a day, strength is unrelated to outcome unless within_slope > 0."""
+    rnd, rows = random.Random(seed_), []
+    for d in range(days):
+        bull = rnd.random() < 0.5; day_fx = 2.0 if bull else -2.0
+        for _ in range(per_day):
+            pct = rnd.randint(75, 98) if bull else rnd.randint(40, 62)
+            y = day_fx + within_slope * (pct - (86 if bull else 51)) + rnd.gauss(0, 1.5)
+            rows.append({"emitted_date": (date(2026, 1, 1) + timedelta(days=d)).isoformat(), "score_pct": pct, "signed_ret_pct": y, "signed_excess_pct": y})
+    return rows
+
+
+def test_predictiveness_is_judged_within_the_day_so_market_moods_cannot_pass_for_skill():
+    rows = conf_rows(5)
+    assert L.spearman([r["score_pct"] for r in rows], [r["signed_ret_pct"] for r in rows]) > 0.4                      # the pooled test is fooled...
+    t = L.predictive_test(rows); assert t["predictive"] is False and "NOT been shown" in t["verdict"]                 # ...the within-day test is not
+    real = L.predictive_test(conf_rows(5, within_slope=0.12)); assert real["predictive"] is True and real["ic"] > 0.1 and real["n_days"] >= 20
+    assert "Too early" in L.predictive_test(rows[:40])["verdict"]
+
+
+def test_performance_is_only_recomputed_when_outcomes_change(st, monkeypatch):
+    seed(st, 160, 0.5); calls = []
+    real = L.cluster_bootstrap; monkeypatch.setattr(L, "cluster_bootstrap", lambda *a, **k: calls.append(1) or real(*a, **k))
+    L.performance(st, 5); n1 = len(calls); assert n1 > 0
+    L.performance(st, 5); assert len(calls) == n1                                    # served from memo: the 90 s cycle stays cheap
+    with st.conn() as c:
+        sid = c.execute("SELECT id FROM signals_log LIMIT 1").fetchone()["id"]; c.execute("INSERT INTO signal_outcomes(signal_id,horizon,signed_ret_pct,settled_at) VALUES(?,?,?,?)", (sid, 20, 1.0, "2026-07-01T00:00:00"))
+    L.performance(st, 20); assert len(calls) > n1                                    # different horizon / new outcome -> recomputed
+    p = L.performance(st, 5); p["overall"]["n"] = -1; assert L.performance(st, 5)["overall"]["n"] == 160   # callers cannot corrupt the memo
