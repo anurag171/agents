@@ -11,6 +11,7 @@ from engine.ai import apply_ai, configured as ai_configured, interpret_batch
 from engine import snapshot as snapfile
 from engine.cluster import cluster_items
 from engine.instruments import grow_universe
+from engine.screen_panel import evaluate_panel, record_panel
 from engine.screener import SCREEN_VERSION, run_screen
 from engine.decoder import THEMES, aggregate_board, decode_item, grade_of
 from engine.locks import FileLock
@@ -180,8 +181,10 @@ def _screen_job(news_symbols):
     try:
         st = Store()
         payload = run_screen(st, get_universe(), news_symbols=news_symbols, max_symbols=int(os.getenv("VM_SCREEN_MAX", "600")))
+        panel = payload.pop("_panel", [])                                      # the full cross-section (not just picks) for held-out tuning
         payload["logged"] = record_screen(st, payload["picks"], SCREEN_VERSION, engine_version=os.getenv("VM_VERSION", "dev"))
         u = payload["universe"]
+        payload["panel"] = record_panel(st, panel, SCREEN_VERSION, u["with_fundamentals"], u["eligible"])
         st.meta_set("screen_fill", f"{u['with_fundamentals'] / max(1, u['eligible']):.3f}")
         snapfile.write(DISC_PATH, payload)
     except Exception as exc:
@@ -216,6 +219,7 @@ def _maybe_evaluate(force=False):
         return None
     st.meta_set("last_eval_at", time.time())
     res = evaluate_outcomes(st)
+    res["panel"] = evaluate_panel(st)                                                     # settle the screen panel (20/60 days) too
     res["theme_changes"] = update_theme_gates(st)                                         # re-check theme health whenever outcomes settle
     st.meta_set("last_eval_result", json.dumps(res))
     return res

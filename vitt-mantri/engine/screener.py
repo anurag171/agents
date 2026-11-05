@@ -21,9 +21,29 @@ from .bars import fetch_bars, yahoo_symbol
 from .chartgate import evaluate
 from .scoring import label, pct_from_components
 
-SCREEN_VERSION = "q1"
+import json
+import os
+
+DEFAULT_VERSION = "q1"
+WEIGHTS_FILE = os.getenv("VM_SCREEN_WEIGHTS") or os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "screen_weights.json")
 BARS_TTL = 6 * 3600                          # daily bars barely change intraday: reuse them across the progressive fundamentals fill
-W = {"quality": 0.25, "growth": 0.20, "value": 0.15, "momentum": 0.30, "risk": 0.10}
+DEFAULT_W = {"quality": 0.25, "growth": 0.20, "value": 0.15, "momentum": 0.30, "risk": 0.10}
+
+
+def _load_weights():
+    """Changed only by an ADOPTED, held-out-validated run of engine/screen_tuning.py; a corrupt/partial file is ignored."""
+    try:
+        with open(WEIGHTS_FILE) as fh:
+            d = json.load(fh)
+        w = {k: float(v) for k, v in d["weights"].items()}
+        if set(w) == set(DEFAULT_W) and abs(sum(w.values()) - 1) < 1e-6 and all(v > 0 for v in w.values()):
+            return w, str(d["version"])
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    return dict(DEFAULT_W), DEFAULT_VERSION
+
+
+W, SCREEN_VERSION = _load_weights()
 LABEL = {"quality": "Quality", "growth": "Growth", "value": "Value", "momentum": "Momentum vs Nifty", "risk": "Stability"}
 SECTOR_MIN, MIN_BARS = 8, 126
 MIN_TRADED_VALUE = 5e7                      # INR per day (about 5 crore): below this a stock is too thin to act on
@@ -98,7 +118,7 @@ def screen(items: list, pm: dict, funds: dict, news_symbols=(), weights=None, mi
         "peg": peer_ranks(col(lambda t: F(t, "peg") if (F(t, "peg") or 0) > 0 else None), groups, higher=False),
         "rel6": peer_ranks(col(lambda t: pm[t]["rel6"]), groups), "r12": peer_ranks(col(lambda t: pm[t]["ret12_1"]), groups),
         "vol": peer_ranks(col(lambda t: pm[t]["vol"]), groups, higher=False), "mdd": peer_ranks(col(lambda t: pm[t]["maxdd"]), groups, higher=False)}
-    rows = []
+    rows, panel = [], []
     for i in elig:
         t, p, f = i["ticker"], pm[i["ticker"]], funds.get(i["ticker"], {})
         loss = (f.get("profit_margin") is not None and f["profit_margin"] < 0) or (f.get("earn_growth") is None and f.get("pe") is None and f.get("roe") is not None and f["roe"] < 0)
@@ -115,6 +135,8 @@ def screen(items: list, pm: dict, funds: dict, news_symbols=(), weights=None, mi
         if t not in news_symbols: flags.append("no headlines in the current news window")
         if p["pos52"] >= 0.95: flags.append("at 52-week high")
         if not p["above200"]: flags.append("below its 200-day average")
+        panel.append({"ticker": t, "price": round(p["price"], 4), "score": score, "coverage": round(cov, 3), "price_only": price_only, "loss": bool(loss),
+                      "comps": {k: (None if v is None else round(v, 4)) for k, v in comps.items()}})
         tier = None
         if not loss and score >= PICK_MIN and cov >= PICK_COVERAGE and p["trend_ok"] and not price_only: tier = "PICK"
         elif not loss and score >= WATCH_MIN: tier = "WATCHLIST"
@@ -128,7 +150,7 @@ def screen(items: list, pm: dict, funds: dict, news_symbols=(), weights=None, mi
                      "breakdown": [{"key": k, "label": LABEL[k], "weight_pct": int(weights[k] * 100), "available": comps[k] is not None, "value_pct": None if comps[k] is None else int(round(comps[k] * 100)), "note": ""} for k in weights],
                      "no_news": t not in news_symbols, "why": _why(facts, comps, t not in news_symbols)})
     rows.sort(key=lambda r: (-r["score_pct"], r["ticker"]))
-    return {"rows": rows, "screened": len(items), "eligible": len(elig), "with_fundamentals": sum(1 for i in elig if funds.get(i["ticker"])), "min_traded_value": min_tv}
+    return {"rows": rows, "panel": panel, "screened": len(items), "eligible": len(elig), "with_fundamentals": sum(1 for i in elig if funds.get(i["ticker"])), "min_traded_value": min_tv}
 
 
 def _why(f, comps, no_news):
@@ -173,5 +195,5 @@ def run_screen(store, universe, *, fetch=fetch_bars, load_fund=None, news_symbol
              "It is not a prediction. Picks are logged and checked against what the stocks did next; see the track line above."]
     if res["with_fundamentals"] < 0.3 * max(1, res["eligible"]):
         notes.append(f"Fundamentals are available for only {res['with_fundamentals']} of {res['eligible']} screened stocks, so most results are price-only. Add a fundamentals file (VM_FUNDAMENTALS_DIR) or let the Yahoo fill continue.")
-    return {"as_of": now.isoformat(), "version": SCREEN_VERSION, "picks": picks, "watchlist": watch, "notes": notes,
+    return {"_panel": res["panel"], "as_of": now.isoformat(), "version": SCREEN_VERSION, "picks": picks, "watchlist": watch, "notes": notes,
             "universe": {"requested": len(inst), "with_prices": len(pm), "eligible": res["eligible"], "with_fundamentals": res["with_fundamentals"], "min_traded_value": MIN_TRADED_VALUE, "fundamentals_info": finfo}}

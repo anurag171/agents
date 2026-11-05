@@ -128,7 +128,7 @@ def run(store: Store, horizon: int = HEADLINE_H, seed: int = 7, now: datetime | 
         return rep
     t0, t1 = rep["splits"]["test"]["from"], rep["splits"]["test"]["to"]
     with store.conn() as c:
-        prior = c.execute("SELECT COUNT(*) n FROM tuning_runs WHERE decision!='INSUFFICIENT_DATA' AND test_end>=? AND test_start<=?", (t0, t1)).fetchone()["n"]
+        prior = c.execute("SELECT COUNT(*) n FROM tuning_runs WHERE decision!='INSUFFICIENT_DATA' AND COALESCE(target,'news')='news' AND test_end>=? AND test_start<=?", (t0, t1)).fetchone()["n"]
         rep["test_look"] = prior + 1
         if prior:
             rep["notes"].append(f"This test window overlaps data already used by {prior} earlier run(s): the test result is now optimistic and the weights cannot be adopted without --allow-reuse.")
@@ -151,6 +151,8 @@ def adopt(store: Store, run_id: int | None = None, allow_reuse: bool = False, pa
         r = (c.execute("SELECT * FROM tuning_runs WHERE id=?", (run_id,)) if run_id else c.execute("SELECT * FROM tuning_runs ORDER BY id DESC LIMIT 1")).fetchone()
     if not r:
         raise ValueError("no tuning run to adopt; run `report` first")
+    if (r["target"] or "news") != "news":
+        raise ValueError(f"run {r['id']} is a {r['target']} tuning run; use engine.screen_tuning to adopt it")
     if r["decision"] != "ADOPT":
         raise ValueError(f"run {r['id']} decided {r['decision']}: nothing to adopt")
     if r["test_look"] > 1 and not allow_reuse:

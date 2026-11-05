@@ -8,7 +8,7 @@ import os
 import sqlite3
 from contextlib import contextmanager
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 DDL = """
 CREATE TABLE IF NOT EXISTS signals_log(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -48,6 +48,15 @@ CREATE TABLE IF NOT EXISTS tuning_runs(
 """,
     3: """
 CREATE TABLE IF NOT EXISTS fundamentals(symbol TEXT PRIMARY KEY, source TEXT, fetched_at TEXT NOT NULL, json TEXT NOT NULL);
+""",
+    4: """
+ALTER TABLE tuning_runs ADD COLUMN target TEXT DEFAULT 'news';
+CREATE TABLE IF NOT EXISTS screen_panel(
+  run_date TEXT NOT NULL, ticker TEXT NOT NULL, version TEXT NOT NULL, yahoo TEXT, price REAL, score_pct INTEGER, tier TEXT, coverage_pct INTEGER,
+  comps_json TEXT NOT NULL, PRIMARY KEY(run_date, ticker, version));
+CREATE TABLE IF NOT EXISTS screen_panel_outcomes(
+  run_date TEXT NOT NULL, ticker TEXT NOT NULL, version TEXT NOT NULL, horizon INTEGER NOT NULL, exit_date TEXT, ret_pct REAL, bench_ret_pct REAL,
+  excess_pct REAL, settled_at TEXT, PRIMARY KEY(run_date, ticker, version, horizon));
 """,
 }
 

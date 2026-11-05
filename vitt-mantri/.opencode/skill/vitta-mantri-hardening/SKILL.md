@@ -348,6 +348,7 @@ Cluster-aware track record (`engine/signal_log.py`): calls made on the same day 
 - "does strength predict outcomes" compares calls WITHIN each day (ranks and permutations inside days), so a bullish day full of strong calls cannot pass for skill;
 - `performance()` is memoised on (outcomes settled, calls logged) so the 90 s cycle stays cheap (~2 s once per change at 3,000 calls).
 
-Still open (do next, in this order): extend the held-out protocol (engine/tuning.py) to the screen weights/thresholds (`screener.W`, PICK_MIN) once screen picks have settled;
-recency decay in `aggregate_board` (P4); honest-UA default and dropping dead/paywalled sources after a source-yield audit (P1); structured logging/metrics, Docker non-root image (P7).
+Screen weight tuning (`engine/screen_panel.py`, `engine/screen_tuning.py`, CLI `python -m engine.screen_tuning report|adopt|rollback`): every screen run (weekly, only when >=60% of stocks have fundamentals) snapshots the WHOLE screened cross-section, settled at 20/60 days vs the Nifty (no backfill: point-in-time fundamentals can't be rebuilt). Tuning uses thinned dates (no overlapping return windows), 60/20/20 split by date, one look at test, needs >=40 independent dates (~3.5 years), >=8 test dates with the gain on >=75% of them, bootstrap over dates clearing zero at 97.5%. Simulated at 48 dates: wrongly adopts on noise ~1 in 30, strong edge 30/30, weak edge ~half. PICK thresholds are deliberately not tuned.
+
+Still open (do next, in this order): recency decay in `aggregate_board` (P4); honest-UA default and paywalled-source cleanup (P1); structured logging, health probes, Docker non-root image (P7).
 Unverified from the build sandbox (check on first run): NSE/Yahoo endpoint formats - failures show up as `error` in `/api/briefing` coverage.
