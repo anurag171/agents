@@ -2,6 +2,7 @@ import json, random, sqlite3
 from datetime import datetime, timedelta, timezone
 import pytest
 from engine import signal_log as L
+from engine import scoring
 from engine.store import DDL, SCHEMA_VERSION, Store
 
 NOW = datetime(2026, 12, 1, 12, 0, tzinfo=timezone.utc)
@@ -19,7 +20,7 @@ def add_calls(st, theme, kind="stock", days=40, per_day=1, mean=0.0, sd=1.0, see
             day = (start + timedelta(days=i)).date().isoformat(); y = rnd.gauss(mean, sd)
             for j in range(per_day):
                 cur = c.execute("INSERT INTO signals_log(emitted_at,emitted_date,kind,ticker,yahoo,mkt,direction,news_action,final_action,scoring_version,primary_theme) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                                (day + "T10:00:00+00:00", day, kind, f"{theme}_{ticker}{i}_{j}", "X", "IN", 1, "BUY", "BUY", "s1", theme))
+                                (day + "T10:00:00+00:00", day, kind, f"{theme}_{ticker}{i}_{j}", "X", "IN", 1, "BUY", "BUY", scoring.DEFAULT_VERSION, theme))
                 c.execute("INSERT INTO signal_outcomes(signal_id,horizon,signed_ret_pct,signed_excess_pct) VALUES(?,?,?,?)", (cur.lastrowid, 5, y + rnd.gauss(0, 0.1), y + rnd.gauss(0, 0.1)))
 
 

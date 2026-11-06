@@ -2,6 +2,7 @@ import json, random
 from datetime import date, datetime, timedelta, timezone
 import pytest
 from engine import signal_log as L
+from engine import scoring
 from engine.store import SCHEMA_VERSION, Store
 from engine.technicals import Bar
 
@@ -127,7 +128,7 @@ def seed(st, n, edge, seed_=3, per_day=8):
             right = rnd.random() < p_right; ret = rnd.uniform(0.5, 4) if right else -rnd.uniform(0.5, 4)
             day = (date(2026, 1, 1) + timedelta(days=i // per_day)).isoformat()
             cur = c.execute("INSERT INTO signals_log(emitted_at,emitted_date,kind,ticker,yahoo,mkt,direction,news_action,final_action,score_pct,chart_verdict,scoring_version) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
-                            (day + "T10:00:00+00:00", day, "stock", f"T{i}", f"T{i}.NS", "IN", 1, "BUY", "BUY" if pct >= 60 else "WATCH", pct, "CONFIRM" if i % 3 == 0 else "NEUTRAL", "s1"))
+                            (day + "T10:00:00+00:00", day, "stock", f"T{i}", f"T{i}.NS", "IN", 1, "BUY", "BUY" if pct >= 60 else "WATCH", pct, "CONFIRM" if i % 3 == 0 else "NEUTRAL", scoring.DEFAULT_VERSION))
             c.execute("INSERT INTO signal_outcomes(signal_id,horizon,signed_ret_pct,signed_excess_pct,bench_ret_pct,settled_at) VALUES(?,?,?,?,?,?)", (cur.lastrowid, 5, ret, ret - 0.2, 0.3, "2026-06-01T00:00:00"))
 
 

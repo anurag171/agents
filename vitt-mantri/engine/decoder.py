@@ -1,5 +1,7 @@
+import os
 import re
 from collections import defaultdict
+from datetime import datetime, timezone
 
 from .impacts import BUCKETS, SECTOR_RULE_WEIGHT, load_theme_config, resolve
 from .instruments import get_universe
@@ -9,6 +11,22 @@ THEMES = load_theme_config()            # keywords/negations/rules; impacts reso
 _RX = {}
 GRADE_A = {"Bloomberg", "Reuters", "Financial Times", "WSJ", "NSE"}
 GRADE_B = {"Yahoo Finance", "Economic Times", "Moneycontrol", "CNBC-TV18", "Business Standard", "MarketWatch", "Investing.com", "Seeking Alpha", "MSN Money"}
+
+
+HALF_LIFE_H = float(os.getenv("VM_NEWS_HALFLIFE_H", "12"))
+
+
+def freshness(news, now=None):
+    """Weight 1.0 for news published just now, halving every HALF_LIFE_H hours. A headline with no real timestamp is capped at 0.5."""
+    ts = news.get("published_at") or news.get("fetched_at")
+    try:
+        t = datetime.fromisoformat(ts)
+        t = t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+        age_h = max(0.0, ((now or datetime.now(timezone.utc)) - t).total_seconds() / 3600)
+    except (TypeError, ValueError):
+        age_h = 0.0
+    w = 0.5 ** (age_h / HALF_LIFE_H)
+    return min(w, 0.5) if news.get("published_estimated") else w
 
 
 def grade_of(src):
@@ -196,7 +214,7 @@ def decode_item(item):
     }
 
 
-def aggregate_board(decoded):
+def aggregate_board(decoded, now=None):
     book = defaultdict(lambda: {
         "ticker": "",
         "buy": 0.0,
@@ -216,7 +234,7 @@ def aggregate_board(decoded):
         for s in news["signals"]:
             row = book[s["ticker"]]
             row["ticker"] = s["ticker"]
-            weight = s["confidence"] * (1.25 if s["hop"] == "direct" else 0.85) * corroboration(news.get("n_sources", 1))
+            weight = s["confidence"] * (1.25 if s["hop"] == "direct" else 0.85) * corroboration(news.get("n_sources", 1)) * freshness(news, now)
             if s["action"] == "BUY":
                 row["buy"] += weight
                 row["direct_buy" if s["hop"] == "direct" else "indirect_buy"] += weight

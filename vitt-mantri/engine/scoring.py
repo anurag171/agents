@@ -23,7 +23,7 @@ import math
 import os
 
 DEFAULT_W = {"news": 0.30, "consistency": 0.10, "corroboration": 0.15, "source": 0.10, "chart": 0.25, "market": 0.10}
-DEFAULT_VERSION = "s1"
+DEFAULT_VERSION = "s2"          # s2 = news weights decay with age (s1 did not)
 WEIGHTS_FILE = os.getenv("VM_SCORING_WEIGHTS") or os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "scoring_weights.json")
 
 

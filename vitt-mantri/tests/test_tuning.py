@@ -24,7 +24,7 @@ def to_db(st, rows):
         for i, r in enumerate(rows):
             bd = [{"key": k, "available": v is not None, "value_pct": None if v is None else int(round(v * 100))} for k, v in r["comps"].items()]
             cur = c.execute("INSERT INTO signals_log(emitted_at,emitted_date,kind,ticker,direction,news_action,final_action,scoring_version,breakdown_json) VALUES(?,?,?,?,?,?,?,?,?)",
-                            (r["d"].isoformat() + "T10:00:00+00:00", r["d"].isoformat(), "stock", f"T{i}", 1, "BUY", "BUY", "s1", json.dumps(bd)))
+                            (r["d"].isoformat() + "T10:00:00+00:00", r["d"].isoformat(), "stock", f"T{i}", 1, "BUY", "BUY", scoring.DEFAULT_VERSION, json.dumps(bd)))
             c.execute("INSERT INTO signal_outcomes(signal_id,horizon,signed_ret_pct) VALUES(?,?,?)", (cur.lastrowid, 5, r["y"]))
 
 
@@ -95,17 +95,17 @@ def test_burned_test_window_is_flagged_and_blocks_adoption(st, tmp_path, monkeyp
     assert first["decision"] == "ADOPT" and first["test_look"] == 1 and second["test_look"] == 2 and any("optimistic" in n for n in second["notes"])
     path = str(tmp_path / "w.json")
     with pytest.raises(ValueError, match="re-used a test window"): T.adopt(st, second["run_id"], path=path)
-    out = T.adopt(st, second["run_id"], allow_reuse=True, path=path); assert out["version"] == "s2"
+    out = T.adopt(st, second["run_id"], allow_reuse=True, path=path); assert out["version"] == T.next_version(scoring.DEFAULT_VERSION)
 
 
 def test_adopt_writes_versioned_weights_scoring_loads_them_and_rollback_restores(st, tmp_path, monkeypatch):
     to_db(st, make_rows(seed=1, signal={"chart": 5.0, "news": 1.0})); rep = T.run(st, 5, n_cand=250); path = str(tmp_path / "scoring_weights.json")
     out = T.adopt(st, rep["run_id"], path=path)
-    d = json.load(open(path)); assert d["version"] == "s2" and sum(d["weights"].values()) == pytest.approx(1.0) and d["from_run"] == rep["run_id"]
+    d = json.load(open(path)); assert d["version"] == T.next_version(scoring.DEFAULT_VERSION) and sum(d["weights"].values()) == pytest.approx(1.0) and d["from_run"] == rep["run_id"]
     monkeypatch.setattr(scoring, "WEIGHTS_FILE", path)
-    w, v = scoring._load_weights(); assert v == "s2" and w["chart"] == pytest.approx(out["weights"]["chart"], abs=1e-5) and w != scoring.DEFAULT_W
+    w, v = scoring._load_weights(); assert v == T.next_version(scoring.DEFAULT_VERSION) and w["chart"] == pytest.approx(out["weights"]["chart"], abs=1e-5) and w != scoring.DEFAULT_W
     with st.conn() as c: assert c.execute("SELECT adopted FROM tuning_runs WHERE id=?", (rep["run_id"],)).fetchone()["adopted"] == 1
-    assert T.rollback(path) is True and scoring._load_weights() == (scoring.DEFAULT_W, "s1") and T.rollback(path) is False
+    assert T.rollback(path) is True and scoring._load_weights() == (scoring.DEFAULT_W, scoring.DEFAULT_VERSION) and T.rollback(path) is False
 
 
 def test_nothing_to_adopt_when_decision_is_keep_and_bad_weight_files_are_ignored(st, tmp_path, monkeypatch):
@@ -113,5 +113,5 @@ def test_nothing_to_adopt_when_decision_is_keep_and_bad_weight_files_are_ignored
     assert rep["decision"] == "KEEP"
     with pytest.raises(ValueError, match="nothing to adopt"): T.adopt(st, rep["run_id"], path=str(tmp_path / "x.json"))
     bad = tmp_path / "bad.json"; bad.write_text(json.dumps({"version": "s9", "weights": {"news": 1.0}}))
-    monkeypatch.setattr(scoring, "WEIGHTS_FILE", str(bad)); assert scoring._load_weights() == (scoring.DEFAULT_W, "s1")      # corrupt/partial file never applied
+    monkeypatch.setattr(scoring, "WEIGHTS_FILE", str(bad)); assert scoring._load_weights() == (scoring.DEFAULT_W, scoring.DEFAULT_VERSION)      # corrupt/partial file never applied
     assert T.next_version("s1") == "s2" and T.next_version("s9") == "s10"

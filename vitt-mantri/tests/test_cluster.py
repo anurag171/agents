@@ -44,11 +44,27 @@ def test_board_weight_is_capped_not_multiplied_by_outlet_count():
 
 def test_end_to_end_five_headlines_no_longer_inflate_the_board():
     raw = [art(s, BRENT) for s in ("Reuters", "Moneycontrol", "Economic Times", "MSN Money", "Yahoo Finance")]
-    board_old = aggregate_board([d for d in map(decode_item, raw) if d])
-    board_new = aggregate_board([d for d in map(decode_item, cluster_items(raw, grade_of)) if d])
+    from datetime import datetime, timezone
+    t = datetime(2026, 10, 20, 8, tzinfo=timezone.utc)                       # the headlines' own clock: no decay between them and "now"
+    board_old = aggregate_board([d for d in map(decode_item, raw) if d], t)
+    board_new = aggregate_board([d for d in map(decode_item, cluster_items(raw, grade_of)) if d], t)
     old = {r["ticker"]: abs(r["net"]) for r in board_old}; new = {r["ticker"]: abs(r["net"]) for r in board_new}
     assert old and all(new[t] < old[t] for t in new) and all(new[t] <= old[t] / 5 * 1.75 + 0.01 for t in new)
     assert board_new[0]["events"] == 1 and len(board_new[0]["sources"]) == 5
 
 
 import pytest
+
+
+def test_old_news_counts_less_and_untimed_news_is_capped():
+    from datetime import datetime, timedelta, timezone
+    from engine.decoder import HALF_LIFE_H, freshness
+    now = datetime(2026, 10, 20, 12, tzinfo=timezone.utc); at = lambda h: (now - timedelta(hours=h)).isoformat()
+    assert freshness({"published_at": at(0)}, now) == pytest.approx(1.0)
+    assert freshness({"published_at": at(HALF_LIFE_H)}, now) == pytest.approx(0.5) and freshness({"published_at": at(3 * HALF_LIFE_H)}, now) == pytest.approx(0.125)
+    assert freshness({"published_at": None, "fetched_at": at(0), "published_estimated": True}, now) == pytest.approx(0.5)      # no real timestamp: capped
+    assert freshness({}, now) == pytest.approx(1.0)                                                                                # missing data never crashes
+    sig = lambda: [{"ticker": "ONGC", "confidence": 1.0, "hop": "direct", "action": "BUY", "why": "w"}]
+    mk = lambda h: [{"signals": sig(), "title": "t", "source": "Reuters", "sources": ["Reuters"], "n_sources": 1, "region": "G", "published_at": at(h)}]
+    fresh, stale = aggregate_board(mk(0), now)[0]["net"], aggregate_board(mk(24), now)[0]["net"]
+    assert stale == pytest.approx(fresh / 4, rel=0.01)                                                                             # 24 h = two half-lives
