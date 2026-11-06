@@ -17,16 +17,13 @@ from bs4 import BeautifulSoup
 
 from .resilience import Breaker
 
+BROWSER_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
 HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
-    ),
+    "User-Agent": f"VittaMantri/2.0 (research tool; contact: {os.getenv('VM_CONTACT', 'set VM_CONTACT')})",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-IN,en-US,en;q=0.9",
 }
-
-HEADERS["User-Agent"] = os.getenv("VM_USER_AGENT", HEADERS["User-Agent"])    # set an honest UA (with contact) where sources allow it
+HEADERS["User-Agent"] = os.getenv("VM_USER_AGENT", HEADERS["User-Agent"])    # override the whole string if you must
 TIMEOUT = (3.05, 10)                                                          # (connect, read) seconds, on EVERY request
 RETRIES, RETRY_STATUS = 2, {429, 500, 502, 503, 504}
 MAX_WORKERS = int(os.getenv("VM_SCRAPE_WORKERS", "8"))
@@ -132,7 +129,7 @@ SOURCES = [
         "base": "https://www.msn.com",
     },
     {
-        "name": "NSE",
+        "name": "NSE", "browser_ua": True,
         "region": "India",
         "feeds": [
             "https://nsearchives.nseindia.com/content/RSS/Online_announcements.xml",
@@ -201,10 +198,7 @@ SOURCES = [
             "https://feeds.bloomberg.com/markets/news.rss",
             "https://feeds.bloomberg.com/economics/news.rss",
         ],
-        "pages": [
-            "https://www.bloomberg.com/markets",
-            "https://www.bloomberg.com/economics",
-        ],
+        "pages": [],
         "host": "bloomberg.com",
         "path_any": ("/news/", "/articles/"),
         "base": "https://www.bloomberg.com",
@@ -232,9 +226,7 @@ SOURCES = [
             "https://www.ft.com/rss/home",
             "https://www.ft.com/markets?format=rss",
         ],
-        "pages": [
-            "https://www.ft.com/markets",
-        ],
+        "pages": [],
         "host": "ft.com",
         "path_any": ("/content/", "/markets"),
         "base": "https://www.ft.com",
@@ -247,10 +239,7 @@ SOURCES = [
             "https://feeds.a.dj.com/rss/WSJcomUSBusiness.xml",
             "https://feeds.content.dowjones.io/public/rss/mw_realtimeheadlines",
         ],
-        "pages": [
-            "https://www.wsj.com/finance",
-            "https://www.wsj.com/news/markets",
-        ],
+        "pages": [],
         "host": "wsj.com",
         "path_any": ("/articles/", "/finance/", "/markets/"),
         "base": "https://www.wsj.com",
@@ -258,9 +247,11 @@ SOURCES = [
 ]
 
 
-def _session():
+def _session(browser=False):
     s = requests.Session()
     s.headers.update(HEADERS)
+    if browser:                                   # only sources that reject non-browser clients (NSE); everyone else sees the honest UA
+        s.headers["User-Agent"] = BROWSER_UA
     return s
 
 
@@ -491,7 +482,8 @@ PER_SOURCE_CAP = 16
 
 def _scrape_source(spec, make_session=_session):
     """All feeds + HTML fallback (+ NSE API / Google News) for ONE source. Returns (items, errors)."""
-    name, session, items, errors = spec["name"], make_session(), [], []
+    name, items, errors = spec["name"], [], []
+    session = make_session(browser=True) if spec.get("browser_ua") else make_session()
     for url in spec.get("feeds") or []:
         try:
             items += _from_feed(url, name, spec["region"], session)
@@ -560,3 +552,18 @@ def scrape_all(sources=None, make_session=_session, breaker=None, deadline_s=Non
         per[src] = per.get(src, 0) + 1
         unique.append(item)
     return unique[:160], errors, [cov[s["name"]] for s in sources if s["name"] in cov]
+
+
+if __name__ == "__main__":
+    # python -m engine.scraper  -> one pass over every source from THIS machine: what works, how fresh, how many carry real timestamps
+    from datetime import datetime, timezone
+    items, errors, cov = scrape_all(breaker=Breaker())
+    now = datetime.now(timezone.utc)
+    for c in cov:
+        mine = [i for i in items if i["source"] == c["source"]]
+        dated = [i for i in mine if not i.get("published_estimated")]
+        newest = min(((now - datetime.fromisoformat(i["published_at"])).total_seconds() / 3600 for i in dated if i.get("published_at")), default=None)
+        print(f"{c['source']:18} {c['state']:8} items={len(mine):3} with_real_time={len(dated):3} newest={'-' if newest is None else f'{newest:.1f}h'}")
+    print(f"\n{len(items)} items kept, {len(errors)} errors")
+    for e in errors[:15]:
+        print("  ", e[:140])

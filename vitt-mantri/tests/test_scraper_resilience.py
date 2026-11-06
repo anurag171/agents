@@ -105,3 +105,14 @@ def test_breaker_cooldown_escalates_and_half_opens():
     now[0] += 301; assert b.allow("s")                                   # half-open probe
     b.failure("s"); b.failure("s"); assert b.retry_in("s") == 900        # escalates
     b.success("s"); assert b.allow("s") and b.retry_in("s") == 0
+
+
+def test_honest_user_agent_by_default_browser_ua_only_for_nse_and_paywalled_sites_are_rss_only():
+    assert S._session().headers["User-Agent"].startswith("VittaMantri/") and S._session(browser=True).headers["User-Agent"].startswith("Mozilla/")
+    by = {s["name"]: s for s in S.SOURCES}
+    assert by["NSE"].get("browser_ua") and [n for n, s in by.items() if s.get("browser_ua")] == ["NSE"]
+    assert all(by[n]["pages"] == [] and by[n]["feeds"] for n in ("Bloomberg", "WSJ", "Financial Times"))          # headlines via RSS only
+    used = []
+    S._scrape_source(by["NSE"], make_session=lambda browser=False: used.append(browser) or Sess(R(404)))
+    S._scrape_source(by["Reuters"], make_session=lambda browser=False: used.append(browser) or Sess(R(404)))
+    assert used == [True, False]
