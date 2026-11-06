@@ -350,5 +350,7 @@ Cluster-aware track record (`engine/signal_log.py`): calls made on the same day 
 
 Screen weight tuning (`engine/screen_panel.py`, `engine/screen_tuning.py`, CLI `python -m engine.screen_tuning report|adopt|rollback`): every screen run (weekly, only when >=60% of stocks have fundamentals) snapshots the WHOLE screened cross-section, settled at 20/60 days vs the Nifty (no backfill: point-in-time fundamentals can't be rebuilt). Tuning uses thinned dates (no overlapping return windows), 60/20/20 split by date, one look at test, needs >=40 independent dates (~3.5 years), >=8 test dates with the gain on >=75% of them, bootstrap over dates clearing zero at 97.5%. Simulated at 48 dates: wrongly adopts on noise ~1 in 30, strong edge 30/30, weak edge ~half. PICK thresholds are deliberately not tuned.
 
-Still open (do next, in this order): recency decay in `aggregate_board` (P4); honest-UA default and paywalled-source cleanup (P1); structured logging, health probes, Docker non-root image (P7).
-Unverified from the build sandbox (check on first run): NSE/Yahoo endpoint formats - failures show up as `error` in `/api/briefing` coverage.
+Also done: recency decay (news weight halves every `VM_NEWS_HALFLIFE_H`=12 h; untimed headlines capped at 0.5; scoring version s2), honest user agent by default (browser UA only for NSE; Bloomberg/WSJ/FT are RSS-only; `python -m engine.scraper` audits sources),
+JSON logs (`VM_LOG_JSON=1`, one `cycle` line per scrape), `/health/live` + `/health/ready`, non-root Dockerfile (verified only by running from a read-only code copy: Docker itself was not available).
+
+Open items live in `TODO.md` (kept short on purpose).

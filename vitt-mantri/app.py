@@ -1,5 +1,6 @@
 import hmac
 import json
+import logging
 import os
 import threading
 import time
@@ -9,6 +10,7 @@ from flask import Flask, Response, jsonify, render_template, request, stream_wit
 
 from engine.ai import apply_ai, configured as ai_configured, interpret_batch
 from engine import snapshot as snapfile
+from engine.log import event
 from engine.cluster import cluster_items
 from engine.instruments import grow_universe
 from engine.screen_panel import evaluate_panel, record_panel
@@ -95,6 +97,7 @@ def _http_text(url):
 
 
 def _build():
+    t0 = time.time()
     get_universe(get=_http_text)      # no-op while fresh; live refresh (daily) with disk-cache/seed fallback
     raw, errors, coverage = scrape_all()
     events = cluster_items(raw, grade_of)                    # same story from N outlets -> ONE event (+ corroboration)
@@ -146,6 +149,10 @@ def _build():
         snapfile.write(SNAP_PATH, snap)                      # every gunicorn worker serves this one shared snapshot
     except OSError as exc:
         snap.setdefault("errors", []).append(f"snapshot write failed: {exc}")
+    states = [c.get("state") for c in coverage if c.get("state")]
+    event("cycle", cycle=snap.get("cycle"), seconds=round(time.time() - t0, 1), articles=len(raw), events=len(events), board=len(board), buys=sum(r["action"] == "BUY" for r in board),
+          sells=sum(r["action"] == "SELL" for r in board), sources_ok=states.count("ok"), sources_empty=states.count("empty"), sources_open=states.count("open"),
+          sources_deadline=states.count("deadline"), errors=len(errors))
     return snap
 
 
@@ -187,8 +194,10 @@ def _screen_job(news_symbols):
         payload["panel"] = record_panel(st, panel, SCREEN_VERSION, u["with_fundamentals"], u["eligible"])
         st.meta_set("screen_fill", f"{u['with_fundamentals'] / max(1, u['eligible']):.3f}")
         snapfile.write(DISC_PATH, payload)
+        event("screen", picks=len(payload["picks"]), watchlist=len(payload["watchlist"]), with_fundamentals=u["with_fundamentals"], eligible=u["eligible"], panel_logged=payload["panel"].get("logged"))
     except Exception as exc:
         st = Store(); st.meta_set("screen_error", f"{type(exc).__name__}: {exc}")
+        event("screen_failed", logging.WARNING, error=f"{type(exc).__name__}: {exc}")
     finally:
         SCREEN["running"] = False
 
@@ -222,6 +231,7 @@ def _maybe_evaluate(force=False):
     res["panel"] = evaluate_panel(st)                                                     # settle the screen panel (20/60 days) too
     res["theme_changes"] = update_theme_gates(st)                                         # re-check theme health whenever outcomes settle
     st.meta_set("last_eval_result", json.dumps(res))
+    event("evaluate", settled=res.get("settled"), due=res.get("due"), theme_changes=len(res["theme_changes"]))
     return res
 
 
@@ -283,6 +293,7 @@ def _loop():
             _maybe_evaluate()
             _maybe_screen()
         except Exception as exc:
+            event("cycle_failed", logging.ERROR, error=f"{type(exc).__name__}: {exc}")
             with STATE["lock"]:
                 STATE["errors"] = [str(exc)]
         time.sleep(REFRESH_SECONDS)
@@ -291,6 +302,23 @@ def _loop():
 @app.route("/")
 def home():
     return render_template("index.html")
+
+
+@app.route("/health/live")
+def health_live():
+    return jsonify({"ok": True})                          # process is up (liveness probe)
+
+
+@app.route("/health/ready")
+def health_ready():
+    """Ready = the shared snapshot is fresh (the scheduler is alive and producing). Use as the readiness probe."""
+    snap, age = snapfile.read(SNAP_PATH), None
+    try:
+        t = datetime.fromisoformat(snap["updated_at"]); age = (datetime.now(timezone.utc) - (t if t.tzinfo else t.replace(tzinfo=timezone.utc))).total_seconds()
+    except (TypeError, KeyError, ValueError):
+        pass
+    ok = age is not None and age < 3 * REFRESH_SECONDS + 60
+    return jsonify({"ready": ok, "snapshot_age_s": None if age is None else round(age)}), (200 if ok else 503)
 
 
 @app.route("/health")

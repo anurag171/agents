@@ -75,3 +75,18 @@ def test_manual_refresh_cannot_overlap_a_running_build(tmp_path, monkeypatch):
     busy.release()
     called = []; monkeypatch.setattr(app, "_build", lambda: called.append(1) or {"ok": 1})
     assert app._build_exclusive() == {"ok": 1} and called == [1]
+
+
+def test_health_probes_and_json_log_lines(tmp_path, monkeypatch):
+    import app, json as js
+    from datetime import datetime, timedelta, timezone
+    monkeypatch.setattr(app, "SNAP_PATH", str(tmp_path / "snapshot.json")); c = app.app.test_client()
+    assert c.get("/health/live").status_code == 200
+    r = c.get("/health/ready"); assert r.status_code == 503 and r.get_json()["ready"] is False            # no snapshot yet
+    now = datetime.now(timezone.utc)
+    snap.write(app.SNAP_PATH, {"updated_at": now.isoformat()}); assert c.get("/health/ready").status_code == 200
+    snap.write(app.SNAP_PATH, {"updated_at": (now - timedelta(hours=1)).isoformat()}); assert c.get("/health/ready").status_code == 503    # scheduler stalled
+    import logging, engine.log as lg
+    rec = logging.LogRecord("vm", logging.INFO, "", 0, "cycle", (), None); rec.fields = {"cycle": 3, "seconds": 1.2}
+    d = js.loads(lg._Json().format(rec))
+    assert d["msg"] == "cycle" and d["cycle"] == 3 and d["seconds"] == 1.2 and d["level"] == "INFO" and d["ts"].endswith("Z")
