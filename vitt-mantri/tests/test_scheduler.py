@@ -90,3 +90,22 @@ def test_health_probes_and_json_log_lines(tmp_path, monkeypatch):
     rec = logging.LogRecord("vm", logging.INFO, "", 0, "cycle", (), None); rec.fields = {"cycle": 3, "seconds": 1.2}
     d = js.loads(lg._Json().format(rec))
     assert d["msg"] == "cycle" and d["cycle"] == 3 and d["seconds"] == 1.2 and d["level"] == "INFO" and d["ts"].endswith("Z")
+
+
+def test_python_app_py_actually_serves(tmp_path):
+    """Regression: an earlier edit cut the __main__ block, so `python3 app.py` exited without starting a server."""
+    import socket, subprocess, sys, time, urllib.request
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]
+    env = dict(os.environ, PORT=str(port), VM_DATA=str(tmp_path), VM_ROLE="web")
+    p = subprocess.Popen([sys.executable, "app.py"], cwd=ROOT, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        for _ in range(40):
+            try:
+                assert urllib.request.urlopen(f"http://127.0.0.1:{port}/health/live", timeout=2).status == 200; break
+            except OSError:
+                assert p.poll() is None, "app.py exited instead of serving"; time.sleep(0.25)
+        else:
+            raise AssertionError("server never came up")
+    finally:
+        p.kill(); p.wait()
